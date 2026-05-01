@@ -71,3 +71,18 @@ def test_install_main_reuses_shared_install_guard(monkeypatch) -> None:
 
     assert exit_code == 0
     assert captured == [{"install_source": "make_install", "entrypoint": "make install"}]
+
+
+def test_analytics_post_shutdown_capture_is_safe_noop() -> None:
+    analytics = provider.Analytics()
+    analytics.shutdown(flush=False)
+
+    analytics.capture(Event.INSTALL_DETECTED)
+
+    assert analytics._pending == 0
+
+
+def test_shutdown_analytics_without_initialization_is_safe(monkeypatch) -> None:
+    monkeypatch.setattr(provider, "_instance", None)
+
+    provider.shutdown_analytics(flush=False)
