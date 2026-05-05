@@ -79,13 +79,124 @@ def _cmd_status(session: ReplSession, console: Console, args: list[str]) -> bool
 # MCP-type services are rendered separately under `/list mcp` so the default
 # `/list integrations` view stays focused on alert-source / data integrations.
 _MCP_SERVICES = frozenset({"github", "openclaw"})
+_ACTIVE_INTEGRATION_STATUSES = frozenset({"configured", "healthy", "ok", "passed"})
+_MISCONFIGURED_INTEGRATION_STATUSES = frozenset({"failed"})
+_ENV_INTEGRATION_REQUIREMENTS: dict[str, tuple[tuple[str, ...], ...]] = {
+    "alertmanager": (("ALERTMANAGER_INSTANCES",), ("ALERTMANAGER_URL",)),
+    "argocd": (
+        ("ARGOCD_INSTANCES",),
+        ("ARGOCD_BASE_URL", "ARGOCD_AUTH_TOKEN"),
+        ("ARGOCD_BASE_URL", "ARGOCD_USERNAME", "ARGOCD_PASSWORD"),
+    ),
+    "aws": (
+        ("AWS_INSTANCES",),
+        ("AWS_ROLE_ARN",),
+        ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"),
+    ),
+    "azure": (("AZURE_LOG_ANALYTICS_WORKSPACE_ID", "AZURE_LOG_ANALYTICS_TOKEN"),),
+    "azure_sql": (("AZURE_SQL_SERVER", "AZURE_SQL_DATABASE"),),
+    "betterstack": (("BETTERSTACK_QUERY_ENDPOINT", "BETTERSTACK_USERNAME"),),
+    "bitbucket": (("BITBUCKET_WORKSPACE",),),
+    "clickhouse": (("CLICKHOUSE_HOST",),),
+    "coralogix": (("CORALOGIX_INSTANCES",), ("CORALOGIX_API_KEY",)),
+    "datadog": (("DD_INSTANCES",), ("DD_API_KEY", "DD_APP_KEY")),
+    "discord": (("DISCORD_BOT_TOKEN",),),
+    "github": (("GITHUB_MCP_URL",), ("GITHUB_MCP_COMMAND",)),
+    "gitlab": (("GITLAB_ACCESS_TOKEN",),),
+    "google_docs": (("GOOGLE_CREDENTIALS_FILE", "GOOGLE_DRIVE_FOLDER_ID"),),
+    "grafana": (("GRAFANA_INSTANCES",), ("GRAFANA_INSTANCE_URL", "GRAFANA_READ_TOKEN")),
+    "honeycomb": (("HONEYCOMB_INSTANCES",), ("HONEYCOMB_API_KEY",)),
+    "jira": (("JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN"),),
+    "kafka": (("KAFKA_BOOTSTRAP_SERVERS",),),
+    "mariadb": (("MARIADB_HOST", "MARIADB_DATABASE"),),
+    "mongodb": (("MONGODB_CONNECTION_STRING",),),
+    "mongodb_atlas": (
+        ("MONGODB_ATLAS_PUBLIC_KEY", "MONGODB_ATLAS_PRIVATE_KEY", "MONGODB_ATLAS_PROJECT_ID"),
+    ),
+    "mysql": (("MYSQL_HOST", "MYSQL_DATABASE"),),
+    "openclaw": (("OPENCLAW_MCP_URL",), ("OPENCLAW_MCP_COMMAND",)),
+    "openobserve": (
+        ("OPENOBSERVE_URL", "OPENOBSERVE_TOKEN"),
+        ("OPENOBSERVE_URL", "OPENOBSERVE_USERNAME", "OPENOBSERVE_PASSWORD"),
+    ),
+    "opensearch": (("OPENSEARCH_URL",),),
+    "opsgenie": (("OPSGENIE_API_KEY",),),
+    "postgresql": (("POSTGRESQL_HOST", "POSTGRESQL_DATABASE"),),
+    "rabbitmq": (("RABBITMQ_HOST", "RABBITMQ_USERNAME"),),
+    "sentry": (("SENTRY_ORG_SLUG", "SENTRY_AUTH_TOKEN"),),
+    "slack": (("SLACK_WEBHOOK_URL",),),
+    "snowflake": (
+        ("SNOWFLAKE_ACCOUNT", "SNOWFLAKE_TOKEN"),
+        ("SNOWFLAKE_ACCOUNT_IDENTIFIER", "SNOWFLAKE_TOKEN"),
+    ),
+    "splunk": (("SPLUNK_INSTANCES",), ("SPLUNK_URL", "SPLUNK_TOKEN")),
+    "telegram": (("TELEGRAM_BOT_TOKEN",),),
+    "tracer": (("JWT_TOKEN",),),
+    "vercel": (("VERCEL_API_TOKEN",),),
+    "victoria_logs": (("VICTORIA_LOGS_URL",),),
+}
 
 
 def _load_verified_integrations() -> list[dict[str, str]]:
-    """Import lazily so an unconfigured store doesn't slow down every REPL turn."""
+    """Run live integration verification checks."""
     from app.integrations.verify import verify_integrations
 
     return verify_integrations()
+
+
+def _env_group_is_configured(env_group: tuple[str, ...]) -> bool:
+    return all(os.getenv(env_name, "").strip() for env_name in env_group)
+
+
+def _load_list_integrations() -> list[dict[str, str]]:
+    """Return local integration status without making network calls."""
+    from app.integrations.store import load_integrations
+
+    rows: list[dict[str, str]] = []
+    seen_services: set[str] = set()
+
+    for record in load_integrations():
+        service = str(record.get("service", "")).strip().lower()
+        if not service:
+            continue
+        status = str(record.get("status", "active")).strip().lower() or "active"
+        if status == "active":
+            rendered_status = "configured"
+            detail = "Configured in local store. Run /integrations verify to check connectivity."
+        elif status in {"failed", "missing", "misconfigured"}:
+            rendered_status = "failed" if status == "misconfigured" else status
+            detail = "Stored integration needs attention."
+        else:
+            continue
+
+        instances = record.get("instances")
+        instance_count = len(instances) if isinstance(instances, list) else 0
+        instance_detail = f" ({instance_count} instances)" if instance_count > 1 else ""
+        rows.append(
+            {
+                "service": service,
+                "source": "local store",
+                "status": rendered_status,
+                "detail": f"{detail}{instance_detail}",
+            }
+        )
+        seen_services.add(service)
+
+    for service, env_groups in _ENV_INTEGRATION_REQUIREMENTS.items():
+        if service in seen_services:
+            continue
+        if not any(_env_group_is_configured(env_group) for env_group in env_groups):
+            continue
+        rows.append(
+            {
+                "service": service,
+                "source": "local env",
+                "status": "configured",
+                "detail": "Configured in local environment. Run /integrations verify to check connectivity.",
+            }
+        )
+
+    return rows
 
 
 def _load_llm_settings() -> Any | None:
@@ -102,15 +213,38 @@ def _status_style(status: str) -> str:
     return {
         "ok": "green",
         "configured": "green",
+        "passed": "green",
         "missing": "yellow",
         "failed": "red",
     }.get(status, "dim")
 
 
-def _render_integrations_table(console: Console, results: list[dict[str, str]]) -> None:
+def _has_configured_source(row: dict[str, str]) -> bool:
+    source = row.get("source", "").strip()
+    return bool(source and source != "-")
+
+
+def _is_active_or_misconfigured_integration(row: dict[str, str]) -> bool:
+    status = row.get("status", "").strip().lower()
+    if status in _ACTIVE_INTEGRATION_STATUSES | _MISCONFIGURED_INTEGRATION_STATUSES:
+        return True
+    return status == "missing" and _has_configured_source(row)
+
+
+def _render_integrations_table(
+    console: Console,
+    results: list[dict[str, str]],
+    *,
+    show_inactive: bool = False,
+) -> None:
     rows = [r for r in results if r.get("service") not in _MCP_SERVICES]
+    if not show_inactive:
+        rows = [r for r in rows if _is_active_or_misconfigured_integration(r)]
     if not rows:
-        console.print("[dim]no integrations configured.  try `opensre onboard` to add one.[/dim]")
+        console.print(
+            "[dim]no active or misconfigured integrations.  "
+            "try `opensre onboard` to add one.[/dim]"
+        )
         return
     table = Table(title="Integrations", title_style=TERMINAL_ACCENT_BOLD)
     table.add_column("service", style="bold")
@@ -128,10 +262,17 @@ def _render_integrations_table(console: Console, results: list[dict[str, str]]) 
     console.print(table)
 
 
-def _render_mcp_table(console: Console, results: list[dict[str, str]]) -> None:
+def _render_mcp_table(
+    console: Console,
+    results: list[dict[str, str]],
+    *,
+    show_inactive: bool = False,
+) -> None:
     rows = [r for r in results if r.get("service") in _MCP_SERVICES]
+    if not show_inactive:
+        rows = [r for r in rows if _is_active_or_misconfigured_integration(r)]
     if not rows:
-        console.print("[dim]no MCP servers configured.[/dim]")
+        console.print("[dim]no active or misconfigured MCP servers.[/dim]")
         return
     table = Table(title="MCP servers", title_style=TERMINAL_ACCENT_BOLD)
     table.add_column("server", style="bold")
@@ -333,12 +474,12 @@ def _cmd_integrations(session: ReplSession, console: Console, args: list[str]) -
     sub = (args[0].lower() if args else "list").strip()
 
     if sub in ("list", "ls"):
-        _render_integrations_table(console, _load_verified_integrations())
+        _render_integrations_table(console, _load_list_integrations())
         return True
 
     if sub == "verify":
         results = _load_verified_integrations()
-        _render_integrations_table(console, results)
+        _render_integrations_table(console, results, show_inactive=True)
         failed = [r for r in results if r.get("status") in ("failed", "missing")]
         if failed:
             console.print(f"[yellow]{len(failed)} integration(s) need attention.[/yellow]")
@@ -380,7 +521,7 @@ def _cmd_mcp(session: ReplSession, console: Console, args: list[str]) -> bool:  
     sub = (args[0].lower() if args else "list").strip()
 
     if sub in ("list", "ls"):
-        _render_mcp_table(console, _load_verified_integrations())
+        _render_mcp_table(console, _load_list_integrations())
         return True
 
     if sub == "connect":
@@ -585,11 +726,11 @@ def _cmd_list(session: ReplSession, console: Console, args: list[str]) -> bool: 
     sub = (args[0].lower() if args else "").strip()
 
     if sub in ("integrations", "integration", "int"):
-        _render_integrations_table(console, _load_verified_integrations())
+        _render_integrations_table(console, _load_list_integrations())
         return True
 
     if sub in ("mcp", "mcps"):
-        _render_mcp_table(console, _load_verified_integrations())
+        _render_mcp_table(console, _load_list_integrations())
         return True
 
     if sub in ("models", "model", "llm", "llms"):
@@ -604,8 +745,8 @@ def _cmd_list(session: ReplSession, console: Console, args: list[str]) -> bool: 
         )
         return True
 
-    # Default: summary view — show everything compactly.
-    results = _load_verified_integrations()
+    # Default: summary view — show configured or actionable services compactly.
+    results = _load_list_integrations()
     _render_integrations_table(console, results)
     _render_mcp_table(console, results)
     _render_models_table(console)

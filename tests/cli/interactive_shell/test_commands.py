@@ -129,33 +129,54 @@ class TestListCommand:
     _FAKE_INTEGRATIONS = [
         {"service": "datadog", "source": "store", "status": "ok", "detail": "API ok"},
         {"service": "slack", "source": "env", "status": "missing", "detail": "No bot token"},
+        {"service": "sentry", "source": "-", "status": "missing", "detail": "Not configured"},
         {"service": "github", "source": "store", "status": "ok", "detail": "MCP ok"},
         {"service": "openclaw", "source": "store", "status": "failed", "detail": "401 from server"},
     ]
 
-    def _patch_verify(self, monkeypatch: object) -> None:
+    def _patch_list(self, monkeypatch: object) -> None:
         # Import inside test to match the lazy-import used by the handler.
         from app.cli.interactive_shell import commands as cmd_module
 
         monkeypatch.setattr(  # type: ignore[attr-defined]
             cmd_module,
-            "_load_verified_integrations",
+            "_load_list_integrations",
             lambda: list(self._FAKE_INTEGRATIONS),
         )
 
     def test_list_integrations_excludes_mcp_services(self, monkeypatch: object) -> None:
-        self._patch_verify(monkeypatch)
+        self._patch_list(monkeypatch)
         console, buf = _capture()
         dispatch_slash("/list integrations", ReplSession(), console)
         output = buf.getvalue()
         assert "datadog" in output
         assert "slack" in output
+        assert "sentry" not in output
         # MCP-classified services are reserved for /list mcp.
         assert "openclaw" not in output
         assert "github" not in output
 
+    def test_list_integrations_does_not_run_live_verification(
+        self, monkeypatch: object
+    ) -> None:
+        from app.cli.interactive_shell import commands as cmd_module
+
+        monkeypatch.setattr(  # type: ignore[attr-defined]
+            cmd_module,
+            "_load_list_integrations",
+            lambda: list(self._FAKE_INTEGRATIONS),
+        )
+        monkeypatch.setattr(  # type: ignore[attr-defined]
+            cmd_module,
+            "_load_verified_integrations",
+            lambda: pytest.fail("/list should not run live integration verification"),
+        )
+
+        console, _ = _capture()
+        dispatch_slash("/list integrations", ReplSession(), console)
+
     def test_list_mcp_shows_only_mcp_services(self, monkeypatch: object) -> None:
-        self._patch_verify(monkeypatch)
+        self._patch_list(monkeypatch)
         console, buf = _capture()
         dispatch_slash("/list mcp", ReplSession(), console)
         output = buf.getvalue()
@@ -164,7 +185,7 @@ class TestListCommand:
         assert "datadog" not in output
 
     def test_list_mcps_alias(self, monkeypatch: object) -> None:
-        self._patch_verify(monkeypatch)
+        self._patch_list(monkeypatch)
         console, buf = _capture()
         dispatch_slash("/list mcps", ReplSession(), console)
         assert "openclaw" in buf.getvalue()
@@ -220,7 +241,7 @@ class TestListCommand:
         assert "LLM settings unavailable" in buf.getvalue()
 
     def test_list_default_shows_all_three_sections(self, monkeypatch: object) -> None:
-        self._patch_verify(monkeypatch)
+        self._patch_list(monkeypatch)
         self._patch_llm(monkeypatch)
         console, buf = _capture()
         dispatch_slash("/list", ReplSession(), console)
@@ -230,7 +251,7 @@ class TestListCommand:
         assert "LLM connection" in output
 
     def test_list_unknown_target_prints_hint(self, monkeypatch: object) -> None:
-        self._patch_verify(monkeypatch)
+        self._patch_list(monkeypatch)
         console, buf = _capture()
         dispatch_slash("/list bogus", ReplSession(), console)
         output = buf.getvalue()
@@ -242,7 +263,7 @@ class TestListCommand:
 
         monkeypatch.setattr(  # type: ignore[attr-defined]
             cmd_module,
-            "_load_verified_integrations",
+            "_load_list_integrations",
             list,  # callable returning []
         )
         console, buf = _capture()
@@ -259,20 +280,25 @@ class TestIntegrationsCommand:
     _FAKE = [
         {"service": "datadog", "source": "env", "status": "ok", "detail": "ok"},
         {"service": "slack", "source": "env", "status": "missing", "detail": "no token"},
+        {"service": "sentry", "source": "-", "status": "missing", "detail": "not configured"},
         {"service": "github", "source": "store", "status": "ok", "detail": "MCP ok"},
     ]
 
     def _patch(self, monkeypatch: object) -> None:
         from app.cli.interactive_shell import commands as m
 
+        monkeypatch.setattr(m, "_load_list_integrations", lambda: list(self._FAKE))  # type: ignore[attr-defined]
         monkeypatch.setattr(m, "_load_verified_integrations", lambda: list(self._FAKE))  # type: ignore[attr-defined]
 
     def test_list_shows_non_mcp_services(self, monkeypatch: object) -> None:
         self._patch(monkeypatch)
         console, buf = _capture()
         dispatch_slash("/integrations list", ReplSession(), console)
-        assert "datadog" in buf.getvalue()
-        assert "github" not in buf.getvalue()
+        output = buf.getvalue()
+        assert "datadog" in output
+        assert "slack" in output
+        assert "sentry" not in output
+        assert "github" not in output
 
     def test_list_is_default_when_no_subcommand(self, monkeypatch: object) -> None:
         self._patch(monkeypatch)
@@ -334,7 +360,7 @@ class TestMcpCommand:
     def _patch(self, monkeypatch: object) -> None:
         from app.cli.interactive_shell import commands as m
 
-        monkeypatch.setattr(m, "_load_verified_integrations", lambda: list(self._FAKE))  # type: ignore[attr-defined]
+        monkeypatch.setattr(m, "_load_list_integrations", lambda: list(self._FAKE))  # type: ignore[attr-defined]
 
     def test_list_shows_mcp_services(self, monkeypatch: object) -> None:
         self._patch(monkeypatch)
