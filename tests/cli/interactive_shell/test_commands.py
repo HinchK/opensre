@@ -172,6 +172,33 @@ class TestListCommand:
         console, _ = _capture()
         dispatch_slash("/list integrations", ReplSession(), console)
 
+    def test_list_integrations_includes_env_catalog_records(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import app.integrations.catalog as catalog_module
+        import app.integrations.store as store_module
+
+        monkeypatch.setattr(store_module, "load_integrations", list)
+        monkeypatch.setattr(
+            catalog_module,
+            "load_env_integrations",
+            lambda: [
+                {
+                    "service": "datadog",
+                    "status": "active",
+                    "credentials": {"api_key": "dd-api", "app_key": "dd-app"},
+                },
+            ],
+        )
+
+        console, buf = _capture()
+        dispatch_slash("/list integrations", ReplSession(), console)
+
+        output = buf.getvalue()
+        assert "datadog" in output
+        assert "local env" in output
+        assert "configured" in output
+
     def test_list_mcp_shows_only_mcp_services(self, monkeypatch: object) -> None:
         self._patch_list(monkeypatch)
         console, buf = _capture()
