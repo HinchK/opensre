@@ -9,6 +9,7 @@ from typing import Any, cast
 
 from app.nodes.chat import chat_agent_node, general_node, router_node
 from app.remote.stream import StreamEvent
+from app.services.llm_client import LLMOperationalError
 from app.state import AgentState, make_initial_state
 from app.types.config import NodeConfig
 from app.utils.errors import report_and_reraise
@@ -119,7 +120,8 @@ async def astream_investigation(
         ):
             yield _map_langgraph_event(dict(event))
     except Exception as exc:
-        capture_exception(exc)
+        if not isinstance(exc, LLMOperationalError):
+            capture_exception(exc)
         raise
 
 

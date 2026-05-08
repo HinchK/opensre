@@ -93,6 +93,15 @@ class LLMResponse:
     content: str
 
 
+class LLMOperationalError(RuntimeError):
+    """Expected LLM API error due to user config or transient infrastructure.
+
+    Raised for auth failures, rate limits, quota exhaustion, model-not-found,
+    and API overloads.  Filtered from Sentry because these are not application
+    bugs — the user or their infrastructure is the remediation target.
+    """
+
+
 class LLMClient:
     def __init__(
         self, *, model: str, max_tokens: int = 1024, temperature: float | None = None
@@ -116,7 +125,7 @@ class LLMClient:
     def _ensure_client(self) -> None:
         api_key = resolve_llm_api_key("ANTHROPIC_API_KEY")
         if not api_key:
-            raise RuntimeError(
+            raise LLMOperationalError(
                 "Missing ANTHROPIC_API_KEY. Set it in your environment, .env, or secure local keychain before running LLM steps."
             )
         if api_key != self._api_key:
@@ -165,11 +174,11 @@ class LLMClient:
                 response = self._client.messages.create(**kwargs)
                 break
             except AuthenticationError as err:
-                raise RuntimeError(
+                raise LLMOperationalError(
                     "Anthropic authentication failed. Check ANTHROPIC_API_KEY in your environment or .env."
                 ) from err
             except NotFoundError as err:
-                raise RuntimeError(
+                raise LLMOperationalError(
                     f"Anthropic model '{self._model}' was not found. "
                     "Check your configured model name and try again."
                 ) from err
@@ -178,7 +187,7 @@ class LLMClient:
             except Exception as err:
                 last_err = err
                 if attempt == max_attempts - 1:
-                    raise RuntimeError(_format_anthropic_retry_error(err)) from err
+                    raise LLMOperationalError(_format_anthropic_retry_error(err)) from err
                 time.sleep(backoff_seconds)
                 backoff_seconds *= 2
         else:
@@ -211,11 +220,11 @@ class LLMClient:
                         yield text
                 return
             except AuthenticationError as err:
-                raise RuntimeError(
+                raise LLMOperationalError(
                     "Anthropic authentication failed. Check ANTHROPIC_API_KEY in your environment or .env."
                 ) from err
             except NotFoundError as err:
-                raise RuntimeError(
+                raise LLMOperationalError(
                     f"Anthropic model '{self._model}' was not found. "
                     "Check your configured model name and try again."
                 ) from err
@@ -227,7 +236,7 @@ class LLMClient:
                     # the user's screen and a retry would duplicate them.
                     raise
                 if attempt == max_attempts - 1:
-                    raise RuntimeError(_format_anthropic_retry_error(err)) from err
+                    raise LLMOperationalError(_format_anthropic_retry_error(err)) from err
                 time.sleep(backoff_seconds)
                 backoff_seconds *= 2
 
@@ -512,7 +521,7 @@ class OpenAILLMClient:
     def _ensure_client(self) -> OpenAI:
         api_key = resolve_llm_api_key(self._api_key_env) or self._api_key_default
         if not api_key:
-            raise RuntimeError(
+            raise LLMOperationalError(
                 f"Missing {self._api_key_env}. Set it in your environment, .env, or secure local keychain before running LLM steps."
             )
         if self._client is None or api_key != self._api_key:
@@ -565,11 +574,11 @@ class OpenAILLMClient:
                 response = client.chat.completions.create(**kwargs)
                 break
             except OpenAIAuthError as err:
-                raise RuntimeError(
+                raise LLMOperationalError(
                     f"{self._provider_label} authentication failed. Check {self._api_key_env} in your environment, .env, or secure local keychain."
                 ) from err
             except OpenAINotFoundError as err:
-                raise RuntimeError(
+                raise LLMOperationalError(
                     f"{self._provider_label} model '{self._model}' was not found. "
                     "Check your configured model name or endpoint."
                 ) from err
@@ -578,7 +587,7 @@ class OpenAILLMClient:
             except OpenAIRateLimitError as err:
                 last_err = err
                 if attempt == max_attempts - 1:
-                    raise RuntimeError(
+                    raise LLMOperationalError(
                         f"{self._provider_label} rate limit exceeded (HTTP 429) after multiple retries. "
                         "Check your quota and billing details."
                     ) from err
@@ -589,7 +598,7 @@ class OpenAILLMClient:
             except Exception as err:
                 last_err = err
                 if attempt == max_attempts - 1:
-                    raise RuntimeError(
+                    raise LLMOperationalError(
                         "LLM API request failed after multiple retries. Try again in a few seconds."
                     ) from err
                 time.sleep(backoff_seconds)
@@ -632,11 +641,11 @@ class OpenAILLMClient:
                         yield delta
                 return
             except OpenAIAuthError as err:
-                raise RuntimeError(
+                raise LLMOperationalError(
                     f"{self._provider_label} authentication failed. Check {self._api_key_env} in your environment, .env, or secure local keychain."
                 ) from err
             except OpenAINotFoundError as err:
-                raise RuntimeError(
+                raise LLMOperationalError(
                     f"{self._provider_label} model '{self._model}' was not found. "
                     "Check your configured model name or endpoint."
                 ) from err
@@ -646,7 +655,7 @@ class OpenAILLMClient:
                 if emitted:
                     raise
                 if attempt == max_attempts - 1:
-                    raise RuntimeError(
+                    raise LLMOperationalError(
                         f"{self._provider_label} rate limit exceeded (HTTP 429) after multiple retries. "
                         "Check your quota and billing details."
                     ) from err
@@ -660,7 +669,7 @@ class OpenAILLMClient:
                     # the user's screen and a retry would duplicate them.
                     raise
                 if attempt == max_attempts - 1:
-                    raise RuntimeError(
+                    raise LLMOperationalError(
                         "LLM API request failed after multiple retries. Try again in a few seconds."
                     ) from err
                 time.sleep(backoff_seconds)

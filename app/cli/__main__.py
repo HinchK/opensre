@@ -252,7 +252,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         return 0
     except BaseException as exc:
-        if not isinstance(exc, KeyboardInterrupt):
+        if not isinstance(exc, KeyboardInterrupt) and should_report_exception(exc):
             capture_exception(exc, context="cli.main.unhandled")
             with suppress(Exception):
                 import sentry_sdk as _sentry_sdk

@@ -8,6 +8,7 @@ from typing import Any
 import click
 
 from app.cli.support.errors import OpenSREError
+from app.services.llm_client import LLMOperationalError
 from app.utils.sentry_sdk import capture_exception
 
 
@@ -17,7 +18,11 @@ def should_report_exception(exc: BaseException, *, expected: bool = False) -> bo
         return False
     if isinstance(exc, (KeyboardInterrupt, EOFError, OpenSREError, click.Abort)):
         return False
-    return not isinstance(exc, click.UsageError)
+    if isinstance(exc, click.UsageError):
+        return False
+    # LLMOperationalError covers auth failures, rate limits, quota exhaustion,
+    # model-not-found, and API overloads — user or infrastructure issues, not bugs.
+    return not isinstance(exc, LLMOperationalError)
 
 
 def report_exception(

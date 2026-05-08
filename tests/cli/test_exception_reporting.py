@@ -5,6 +5,7 @@ import pytest
 
 from app.cli.support.errors import OpenSREError
 from app.cli.support.exception_reporting import report_exception, should_report_exception
+from app.services.llm_client import LLMOperationalError
 
 
 def test_should_not_report_unknown_command_usage_error() -> None:
@@ -17,6 +18,21 @@ def test_should_not_report_expected_cli_errors() -> None:
     assert should_report_exception(KeyboardInterrupt()) is False
     assert should_report_exception(click.Abort()) is False
     assert should_report_exception(ValueError("user input"), expected=True) is False
+
+
+def test_should_not_report_llm_operational_errors() -> None:
+    assert should_report_exception(LLMOperationalError("Anthropic authentication failed.")) is False
+    assert (
+        should_report_exception(
+            LLMOperationalError("LLM API request failed after multiple retries.")
+        )
+        is False
+    )
+    assert should_report_exception(LLMOperationalError("OpenAI rate limit exceeded.")) is False
+
+
+def test_should_report_unexpected_runtime_errors() -> None:
+    assert should_report_exception(RuntimeError("unexpected code bug")) is True
 
 
 def test_report_exception_captures_unexpected_error(monkeypatch: pytest.MonkeyPatch) -> None:
