@@ -67,9 +67,18 @@ from app.integrations.llm_cli.env_overrides import (
 _COPILOT_VERSION_RE = re.compile(r"(\d+\.\d+\.\d+)")
 _PROBE_TIMEOUT_SEC = 5.0
 _KEYCHAIN_PROBE_TIMEOUT_SEC = 2.0
-# `copilot-cli` is what the GitHub docs name, but the CLI has historically used
-# a few other service names; check all of them so a working login is detected.
-_KEYCHAIN_SERVICES: tuple[str, ...] = ("copilot-cli", "github-copilot-cli", "gh-copilot")
+# Service names the macOS Keychain probe accepts as a positive auth signal:
+# - ``copilot-cli`` is what the GitHub docs name for a copilot-specific login;
+# - ``github-copilot-cli`` / ``gh-copilot`` are historical variants;
+# - ``gh:github.com`` is the entry written by the standalone ``gh`` CLI.
+#   The Copilot CLI delegates to ``gh``'s stored token when no copilot-specific
+#   login exists, so a logged-in ``gh`` is sufficient for ``copilot -p`` to work.
+_KEYCHAIN_SERVICES: tuple[str, ...] = (
+    "copilot-cli",
+    "github-copilot-cli",
+    "gh-copilot",
+    "gh:github.com",
+)
 _AUTH_HINT = "Run `copilot` then /login, or set COPILOT_GITHUB_TOKEN / GH_TOKEN / GITHUB_TOKEN."
 
 
