@@ -16,6 +16,7 @@ from rich.console import Console
 
 from tests.synthetic.mock_aws_backend import FixtureAWSBackend
 from tests.synthetic.mock_grafana_backend.backend import FixtureGrafanaBackend
+from tests.synthetic.rds_postgres.evidence_sources import missing_sources as _evidence_missing
 from tests.synthetic.rds_postgres.observations import (
     TrajectoryPolicy,
     TrajectoryPolicyResult,
@@ -31,13 +32,6 @@ from tests.synthetic.rds_postgres.scenario_loader import (
     ScenarioFixture,
     load_all_scenarios,
 )
-
-# Maps fixture schema evidence keys to the agent's internal state keys.
-_EVIDENCE_KEY_MAP: dict[str, str] = {
-    "aws_cloudwatch_metrics": "grafana_metrics",
-    "aws_rds_events": "grafana_logs",
-    "aws_performance_insights": "grafana_metrics",
-}
 
 
 def _run_investigation_lazy(**kwargs: Any) -> Any:
@@ -598,38 +592,15 @@ def score_result(
         f"forbidden_hits={forbidden_hits}",
     )
 
-    # 4. Evidence path check — required sources must be non-empty in final_state["evidence"].
-    # Fixture schema keys (aws_cloudwatch_metrics, aws_rds_events, aws_performance_insights) map to the agent's
-    # internal evidence keys (grafana_metrics, grafana_logs) set by _map_grafana_*.
+    # 4. Evidence path check — use semantic source predicates (evidence_sources module).
+    # Each source has a dedicated predicate that inspects final_state["evidence"] using
+    # the canonical source ID, so aws_cloudwatch_metrics and aws_performance_insights are
+    # never conflated even though both may flow through grafana_metrics at the transport layer.
     missing_required_evidence: list[str] = []
     if answer_key.required_evidence_sources:
-        evidence = final_state.get("evidence") or {}
-        performance_insights_tokens = (
-            "top sql activity",
-            "avg load",
-            "aas",
-            "db load",
-            "walwrite",
-            "clientread",
+        missing_required_evidence = _evidence_missing(
+            final_state, list(answer_key.required_evidence_sources)
         )
-
-        for source_key in answer_key.required_evidence_sources:
-            if source_key == "aws_performance_insights":
-                state_key = _EVIDENCE_KEY_MAP.get(source_key, source_key)
-
-                has_state_evidence = bool(evidence.get(state_key))
-                has_pi_signal = any(
-                    token in normalized_output for token in performance_insights_tokens
-                )
-
-                if not (has_state_evidence and has_pi_signal):
-                    missing_required_evidence.append(source_key)
-
-                continue
-
-            state_key = _EVIDENCE_KEY_MAP.get(source_key, source_key)
-            if not evidence.get(state_key):
-                missing_required_evidence.append(source_key)
 
     if missing_required_evidence:
         failures.append(
@@ -920,9 +891,7 @@ def _check_baseline(
         actual_canonical = json.loads(
             json.dumps(actual_payload, sort_keys=True, separators=(",", ":"))
         )
-        expected_canonical = json.loads(
-            json.dumps(expected, sort_keys=True, separators=(",", ":"))
-        )
+        expected_canonical = json.loads(json.dumps(expected, sort_keys=True, separators=(",", ":")))
         if actual_canonical != expected_canonical:
             actual_str = json.dumps(actual_payload, indent=2, sort_keys=True)
             expected_str = json.dumps(expected, indent=2, sort_keys=True)
