@@ -94,10 +94,26 @@ def _build_available_sources_hint(available_sources: dict[str, dict]) -> str:
     if "grafana" in available_sources:
         grafana = available_sources["grafana"]
         loki_only = grafana.get("loki_only", False)
+        no_traces = grafana.get("no_traces", False)
         grafana_label = "Grafana Local (Loki only)" if loki_only else "Grafana Cloud"
-        traces_hint = (
-            "" if loki_only else "\n- Use query_grafana_traces to find distributed traces in Tempo"
-        )
+        if loki_only or no_traces:
+            # Local Grafana has no Tempo; RDS alerts have no useful trace data.
+            # Emit an explicit prohibition so the planner never selects traces.
+            traces_hint = (
+                "\n- PROHIBITED: Do NOT call query_grafana_traces for this incident."
+                " This is an RDS/database resource-threshold alert — distributed traces"
+                " (Tempo) contain no data for infrastructure ceiling breaches (connections,"
+                " CPU, storage, IOPS). Selecting query_grafana_traces wastes the tool"
+                " budget and will be scored as an extra action."
+                if no_traces
+                else ""  # loki_only: just omit — no Tempo endpoint exists
+            )
+        else:
+            traces_hint = (
+                "\n- Use query_grafana_traces to find distributed traces in Tempo"
+                " — only relevant for request-latency or service-mesh incidents,"
+                " NOT for database resource threshold alerts (connections, CPU, storage)"
+            )
         hints.append(
             f"""{grafana_label} Available:
 - Service Name: {grafana.get("service_name")}
@@ -448,6 +464,7 @@ Additionally:
 - When connection counts are high, explicitly evaluate whether idle connections are contributing to the issue and include this explicitly in your reasoning if relevant.
 - When storage pressure is observed, explicitly consider audit logs or database-specific logging mechanisms (e.g. audit_log for PostgreSQL/Aurora)
 - For RDS/Postgres storage alerts, collect metrics, logs/events, and alert rules together when Grafana is available so the final RCA can connect FreeStorageSpace, WriteIOPS, RDS events, and the triggering alert.
+- For RDS/database resource threshold alerts (connections, CPU, storage, IOPS), when Grafana is available: prefer `query_grafana_alert_rules` over `query_grafana_traces`. Alert rules confirm the threshold configuration and the primary metric that fired, which directly anchors the RCA category. Distributed traces (Tempo) are only valuable when the incident is about request latency or service-mesh errors — they contain no useful data for infrastructure ceiling breaches. Do not select `query_grafana_traces` when the alert is clearly firing on a database resource metric.
 
 Avoid:
 - collecting general context that does not help separate hypotheses
