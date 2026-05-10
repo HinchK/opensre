@@ -16,12 +16,6 @@ from rich.console import Console
 import app.cli.interactive_shell.orchestration.action_executor as action_executor
 import app.cli.interactive_shell.orchestration.agent_actions as agent_actions
 from app.cli.interactive_shell.intent import intent_parser as intent_parser_module
-from app.cli.interactive_shell.orchestration.agent_actions import (
-    execute_cli_actions,
-    execute_cli_actions_with_metrics,
-    plan_cli_actions,
-    plan_terminal_tasks,
-)
 from app.cli.interactive_shell.runtime.session import ReplSession
 from app.cli.interactive_shell.runtime.tasks import TaskKind, TaskStatus
 from app.cli.interactive_shell.shell import execution as shell_execution
@@ -35,40 +29,42 @@ def _capture() -> tuple[Console, io.StringIO]:
 def test_health_then_connected_services_plans_two_actions_in_order() -> None:
     message = "check the health of my opensre and then show me all connected services"
 
-    assert plan_cli_actions(message) == ["/health", "/list integrations"]
+    assert agent_actions.plan_cli_actions(message) == ["/health", "/list integrations"]
 
 
 def test_local_llama_connect_is_not_hardcoded_as_cli_action() -> None:
-    assert plan_cli_actions("please connect to local llama") == []
+    assert agent_actions.plan_cli_actions("please connect to local llama") == []
 
 
 def test_provider_switch_plans_provider_action() -> None:
     message = "switch from the current ollama model to setting the model to anthropic"
 
-    assert plan_terminal_tasks(message) == ["llm_provider"]
-    assert plan_cli_actions(message) == []
+    assert agent_actions.plan_terminal_tasks(message) == ["llm_provider"]
+    assert agent_actions.plan_cli_actions(message) == []
 
 
 def test_implementation_request_plans_implementation_action() -> None:
-    assert plan_terminal_tasks("please implement /history search") == ["implementation"]
-    assert plan_cli_actions("please implement /history search") == []
+    assert agent_actions.plan_terminal_tasks("please implement /history search") == [
+        "implementation"
+    ]
+    assert agent_actions.plan_cli_actions("please implement /history search") == []
 
 
 def test_generic_synthetic_test_request_plans_synthetic_action() -> None:
-    assert plan_terminal_tasks("Can you run a synthetic test?") == ["synthetic_test"]
+    assert agent_actions.plan_terminal_tasks("Can you run a synthetic test?") == ["synthetic_test"]
 
 
 def test_typoed_synthetic_test_request_plans_synthetic_action() -> None:
     message = "can you rnu a syntehtic tset 002-connection-exhaustion"
-    assert plan_terminal_tasks(message) == ["synthetic_test"]
-    assert plan_cli_actions(message) == []
+    assert agent_actions.plan_terminal_tasks(message) == ["synthetic_test"]
+    assert agent_actions.plan_cli_actions(message) == []
 
 
 def test_kill_synthetic_test_request_plans_cancel_action() -> None:
     message = "kill the syntehtic_test because it is runnign way too long"
 
-    assert plan_terminal_tasks(message) == ["task_cancel"]
-    assert plan_cli_actions(message) == []
+    assert agent_actions.plan_terminal_tasks(message) == ["task_cancel"]
+    assert agent_actions.plan_cli_actions(message) == []
 
 
 def test_integration_prompt_plans_datadog_lookup_only() -> None:
@@ -77,7 +73,7 @@ def test_integration_prompt_plans_datadog_lookup_only() -> None:
         "datadog services I have connections to"
     )
 
-    assert plan_cli_actions(message) == ["/integrations show datadog"]
+    assert agent_actions.plan_cli_actions(message) == ["/integrations show datadog"]
 
 
 def test_execute_cli_actions_dispatches_planned_commands(monkeypatch: object) -> None:
@@ -98,7 +94,7 @@ def test_execute_cli_actions_dispatches_planned_commands(monkeypatch: object) ->
 
     session = ReplSession()
     console, buf = _capture()
-    handled = execute_cli_actions(
+    handled = agent_actions.execute_cli_actions(
         "check the health of my opensre and then show me all connected services",
         session,
         console,
@@ -141,7 +137,7 @@ def test_execute_cli_actions_falls_through_for_local_llama_request(monkeypatch: 
 
     session = ReplSession()
     console, _ = _capture()
-    handled = execute_cli_actions("please connect to local llama", session, console)
+    handled = agent_actions.execute_cli_actions("please connect to local llama", session, console)
 
     assert handled is False
     assert dispatched == []
@@ -161,7 +157,7 @@ def test_execute_cli_actions_switches_llm_provider(monkeypatch: object) -> None:
 
     session = ReplSession()
     console, buf = _capture()
-    handled = execute_cli_actions(
+    handled = agent_actions.execute_cli_actions(
         "switch from the current ollama model to setting the model to anthropic",
         session,
         console,
@@ -193,7 +189,7 @@ def test_execute_cli_actions_records_llm_provider_failure(monkeypatch: object) -
 
     session = ReplSession()
     console, _ = _capture()
-    handled = execute_cli_actions(
+    handled = agent_actions.execute_cli_actions(
         "switch from the current ollama model to setting the model to anthropic",
         session,
         console,
@@ -224,7 +220,9 @@ def test_execute_cli_actions_runs_implementation_action(monkeypatch: object) -> 
 
     session = ReplSession()
     console, buf = _capture()
-    handled = execute_cli_actions("please implement /history search", session, console)
+    handled = agent_actions.execute_cli_actions(
+        "please implement /history search", session, console
+    )
 
     assert handled is True
     assert calls == ["/history search"]
@@ -257,7 +255,7 @@ def test_execute_cli_actions_answers_discord_then_dispatches_datadog(
 
     session = ReplSession()
     console, buf = _capture()
-    handled = execute_cli_actions(
+    handled = agent_actions.execute_cli_actions(
         (
             "tell me about what the discord integration can do and then tell me what "
             "datadog services I have connections to"
@@ -279,19 +277,21 @@ def test_compound_prompt_plans_chat_list_and_cli_command() -> None:
         "AND then run opensre deploy"
     )
 
-    assert plan_terminal_tasks(message) == ["slash", "cli_command"]
-    assert plan_cli_actions(message) == ["/list integrations", "deploy"]
+    assert agent_actions.plan_terminal_tasks(message) == ["slash", "cli_command"]
+    assert agent_actions.plan_cli_actions(message) == ["/list integrations", "deploy"]
 
 
 def test_cli_command_requires_explicit_opensre_context() -> None:
     message = "the tool uses -- deploy as an argument separator"
 
-    assert plan_terminal_tasks(message) == []
-    assert plan_cli_actions(message) == []
+    assert agent_actions.plan_terminal_tasks(message) == []
+    assert agent_actions.plan_cli_actions(message) == []
 
 
 def test_cli_command_preserves_flags_after_explicit_opensre_prefix() -> None:
-    assert plan_cli_actions("please run opensre deploy --dry-run") == ["deploy --dry-run"]
+    assert agent_actions.plan_cli_actions("please run opensre deploy --dry-run") == [
+        "deploy --dry-run"
+    ]
 
 
 def test_compound_prompt_plans_chat_list_and_slash_deploy_paraphrase() -> None:
@@ -300,8 +300,8 @@ def test_compound_prompt_plans_chat_list_and_slash_deploy_paraphrase() -> None:
         "AND then deploy OpenSRE to EC2"
     )
 
-    assert plan_terminal_tasks(message) == ["slash", "slash"]
-    assert plan_cli_actions(message) == ["/list integrations", "/deploy"]
+    assert agent_actions.plan_terminal_tasks(message) == ["slash", "slash"]
+    assert agent_actions.plan_cli_actions(message) == ["/list integrations", "/deploy"]
 
 
 def test_services_version_deploy_prompt_plans_all_actions() -> None:
@@ -310,23 +310,23 @@ def test_services_version_deploy_prompt_plans_all_actions() -> None:
         "AND then deploy to EC2 within 90 seconds"
     )
 
-    assert plan_terminal_tasks(message) == ["slash", "slash", "slash"]
-    assert plan_cli_actions(message) == ["/list integrations", "/version", "/deploy"]
+    assert agent_actions.plan_terminal_tasks(message) == ["slash", "slash", "slash"]
+    assert agent_actions.plan_cli_actions(message) == ["/list integrations", "/version", "/deploy"]
 
 
 def test_explicit_shell_command_plans_shell_action() -> None:
-    assert plan_terminal_tasks("run `whoami`") == ["shell"]
-    assert plan_terminal_tasks("run the command `whoami`") == ["shell"]
-    assert plan_cli_actions("run `whoami`") == []
+    assert agent_actions.plan_terminal_tasks("run `whoami`") == ["shell"]
+    assert agent_actions.plan_terminal_tasks("run the command `whoami`") == ["shell"]
+    assert agent_actions.plan_cli_actions("run `whoami`") == []
 
 
 def test_direct_shell_command_plans_shell_action() -> None:
-    assert plan_terminal_tasks("whoami") == ["shell"]
+    assert agent_actions.plan_terminal_tasks("whoami") == ["shell"]
 
 
 def test_sample_alert_launch_plans_sample_alert_action() -> None:
-    assert plan_terminal_tasks("okay launch a simple alert") == ["sample_alert"]
-    assert plan_cli_actions("okay launch a simple alert") == []
+    assert agent_actions.plan_terminal_tasks("okay launch a simple alert") == ["sample_alert"]
+    assert agent_actions.plan_cli_actions("okay launch a simple alert") == []
 
 
 def test_compound_services_and_synthetic_rds_plans_all_actions() -> None:
@@ -334,13 +334,15 @@ def test_compound_services_and_synthetic_rds_plans_all_actions() -> None:
         "show me which services are connected and after that run a synthetic test RDS database"
     )
 
-    assert plan_terminal_tasks(message) == ["slash", "synthetic_test"]
-    assert plan_cli_actions(message) == ["/list integrations"]
+    assert agent_actions.plan_terminal_tasks(message) == ["slash", "synthetic_test"]
+    assert agent_actions.plan_cli_actions(message) == ["/list integrations"]
 
 
 def test_synthetic_scenario_id_plans_synthetic_action_kind() -> None:
-    assert plan_terminal_tasks("run synthetic test 005-failover") == ["synthetic_test"]
-    assert plan_cli_actions("run synthetic test 005-failover") == []
+    assert agent_actions.plan_terminal_tasks("run synthetic test 005-failover") == [
+        "synthetic_test"
+    ]
+    assert agent_actions.plan_cli_actions("run synthetic test 005-failover") == []
 
 
 def test_compound_prompt_executes_all_supported_tasks(monkeypatch: object) -> None:
@@ -361,7 +363,7 @@ def test_compound_prompt_executes_all_supported_tasks(monkeypatch: object) -> No
 
     session = ReplSession()
     console, buf = _capture()
-    handled = execute_cli_actions(
+    handled = agent_actions.execute_cli_actions(
         (
             "tell me how you are doing AND show me all the services we are connected to "
             "AND then deploy OpenSRE to EC2"
@@ -396,7 +398,7 @@ def test_services_version_deploy_prompt_executes_in_order(monkeypatch: object) -
 
     session = ReplSession()
     console, buf = _capture()
-    handled = execute_cli_actions(
+    handled = agent_actions.execute_cli_actions(
         (
             "tell me which services are connected AND then tell me the current CLI version "
             "AND then deploy to EC2 within 90 seconds"
@@ -440,7 +442,7 @@ def test_execute_cli_actions_runs_sample_alert(monkeypatch: object) -> None:
     session = ReplSession()
     console, buf = _capture()
 
-    assert execute_cli_actions("okay launch a simple alert", session, console) is True
+    assert agent_actions.execute_cli_actions("okay launch a simple alert", session, console) is True
     assert calls == ["generic"]
     assert session.last_state == {
         "root_cause": "sample failure",
@@ -478,7 +480,7 @@ def test_execute_cli_actions_sample_alert_opensre_error_marks_task_failed(
 
     session = ReplSession()
     console, _ = _capture()
-    assert execute_cli_actions("okay launch a simple alert", session, console) is True
+    assert agent_actions.execute_cli_actions("okay launch a simple alert", session, console) is True
     inv_tasks = [
         t for t in session.task_registry.list_recent(10) if t.kind == TaskKind.INVESTIGATION
     ]
@@ -514,7 +516,7 @@ def test_execute_cli_actions_lists_all_actions_before_synthetic_rds(monkeypatch:
 
     session = ReplSession()
     console, buf = _capture()
-    handled = execute_cli_actions(
+    handled = agent_actions.execute_cli_actions(
         "show me which services are connected and after that run a synthetic test RDS database",
         session,
         console,
@@ -582,7 +584,7 @@ def test_execute_cli_actions_runs_requested_synthetic_scenario(monkeypatch: obje
 
     session = ReplSession()
     console, buf = _capture()
-    handled = execute_cli_actions("run synthetic test 005-failover", session, console)
+    handled = agent_actions.execute_cli_actions("run synthetic test 005-failover", session, console)
 
     assert handled is True
     assert popen_calls[0][0][-2:] == ["--scenario", "005-failover"]
@@ -599,7 +601,7 @@ def test_execute_cli_actions_cancels_single_running_synthetic_task() -> None:
     task.attach_process(proc)
 
     console, buf = _capture()
-    handled = execute_cli_actions(
+    handled = agent_actions.execute_cli_actions(
         "kill the syntehtic_test because it is runnign way too long",
         session,
         console,
@@ -641,7 +643,9 @@ def test_partial_match_reports_unhandled_clause(monkeypatch: object) -> None:
     session = ReplSession()
     console, buf = _capture()
 
-    assert not execute_cli_actions("show me connected services and sing a song", session, console)
+    assert not agent_actions.execute_cli_actions(
+        "show me connected services and sing a song", session, console
+    )
     assert dispatched == ["/list integrations"]
     assert "don't have a safe built-in action" not in buf.getvalue()
 
@@ -650,7 +654,7 @@ def test_execute_cli_actions_falls_through_for_chat() -> None:
     session = ReplSession()
     console, _ = _capture()
 
-    assert execute_cli_actions("hey", session, console) is False
+    assert agent_actions.execute_cli_actions("hey", session, console) is False
     assert session.history == []
 
 
@@ -667,7 +671,7 @@ def test_execute_cli_actions_runs_shell_command(monkeypatch: object) -> None:
     session = ReplSession()
     console, buf = _capture()
 
-    assert execute_cli_actions("run `pwd`", session, console) is True
+    assert agent_actions.execute_cli_actions("run `pwd`", session, console) is True
     assert session.history == [
         {"type": "cli_agent", "text": "run `pwd`", "ok": True},
         {"type": "shell", "text": "pwd", "ok": True},
@@ -690,7 +694,7 @@ def test_execute_cli_actions_cd_preserves_windows_paths(monkeypatch: object) -> 
     console, _ = _capture()
 
     message = r"run `cd C:\Users\Alice`"
-    assert execute_cli_actions(message, session, console) is True
+    assert agent_actions.execute_cli_actions(message, session, console) is True
     assert changed_directories == [Path(r"C:\Users\Alice")]
     assert session.history == [
         {"type": "cli_agent", "text": message, "ok": True},
@@ -715,7 +719,7 @@ def test_execute_cli_actions_cd_routes_case_insensitively(monkeypatch: object) -
     console, _ = _capture()
 
     message = r"run `CD C:\Users\Alice`"
-    assert execute_cli_actions(message, session, console) is True
+    assert agent_actions.execute_cli_actions(message, session, console) is True
     assert changed_directories == [Path(r"C:\Users\Alice")]
     assert session.history == [
         {"type": "cli_agent", "text": message, "ok": True},
@@ -736,7 +740,7 @@ def test_execute_cli_actions_cd_handles_trailing_backslash_on_windows(monkeypatc
     console, _ = _capture()
 
     message = r"run `cd C:\`"
-    assert execute_cli_actions(message, session, console) is True
+    assert agent_actions.execute_cli_actions(message, session, console) is True
     assert changed_directories == [Path("C:\\")]
     assert session.history == [
         {"type": "cli_agent", "text": message, "ok": True},
@@ -757,7 +761,7 @@ def test_execute_cli_actions_cd_strips_quotes_on_windows(monkeypatch: object) ->
     console, _ = _capture()
 
     message = r'run `cd "C:\Users\Alice"`'
-    assert execute_cli_actions(message, session, console) is True
+    assert agent_actions.execute_cli_actions(message, session, console) is True
     assert changed_directories == [Path(r"C:\Users\Alice")]
     assert session.history == [
         {"type": "cli_agent", "text": message, "ok": True},
@@ -783,7 +787,7 @@ def test_execute_cli_actions_records_shell_failure(monkeypatch: object) -> None:
     session = ReplSession()
     console, buf = _capture()
 
-    assert execute_cli_actions("execute false", session, console) is True
+    assert agent_actions.execute_cli_actions("execute false", session, console) is True
     assert calls == [
         (
             ["false"],
@@ -816,7 +820,7 @@ def test_execute_cli_actions_shell_command_times_out(monkeypatch: object) -> Non
     session = ReplSession()
     console, buf = _capture()
 
-    assert execute_cli_actions("run `true`", session, console) is True
+    assert agent_actions.execute_cli_actions("run `true`", session, console) is True
     assert session.history[-1] == {"type": "shell", "text": "true", "ok": False}
     output = buf.getvalue().lower()
     assert "timed out" in output
@@ -841,7 +845,7 @@ def test_execute_cli_actions_runs_passthrough_with_shell_true(monkeypatch: objec
     session = ReplSession()
     console, buf = _capture()
 
-    assert execute_cli_actions("run `!echo hello`", session, console) is True
+    assert agent_actions.execute_cli_actions("run `!echo hello`", session, console) is True
     assert calls == [
         (
             "echo hello",
@@ -877,7 +881,7 @@ def test_execute_cli_actions_routes_bang_cd_through_builtin(monkeypatch: object)
     console, buf = _capture()
 
     message = "run `!cd /tmp`"
-    assert execute_cli_actions(message, session, console) is True
+    assert agent_actions.execute_cli_actions(message, session, console) is True
     assert dirs == [Path("/tmp")]
     assert session.history[-1] == {"type": "shell", "text": "cd /tmp", "ok": True}
     captured = buf.getvalue()
@@ -897,7 +901,7 @@ def test_execute_cli_actions_routes_bang_pwd_through_builtin(monkeypatch: object
     session = ReplSession()
     console, buf = _capture()
 
-    assert execute_cli_actions("run `!pwd`", session, console) is True
+    assert agent_actions.execute_cli_actions("run `!pwd`", session, console) is True
     assert session.history[-1] == {"type": "shell", "text": "pwd", "ok": True}
     captured = buf.getvalue()
     assert "/shown" in captured
@@ -914,7 +918,7 @@ def test_execute_cli_actions_declines_mutating_shell_when_user_rejects_prompt(
     session = ReplSession()
     console, buf = _capture()
 
-    assert execute_cli_actions("run `rm -rf /tmp/demo`", session, console) is True
+    assert agent_actions.execute_cli_actions("run `rm -rf /tmp/demo`", session, console) is True
     assert session.history[-1] == {"type": "shell", "text": "rm -rf /tmp/demo", "ok": False}
     output = buf.getvalue()
     assert "cancelled" in output.lower()
@@ -925,7 +929,7 @@ def test_execute_cli_actions_blocks_ambiguous_shell_operators() -> None:
     session = ReplSession()
     console, buf = _capture()
 
-    assert execute_cli_actions("run `ls | wc -l`", session, console) is True
+    assert agent_actions.execute_cli_actions("run `ls | wc -l`", session, console) is True
     assert session.history[-1] == {"type": "shell", "text": "ls | wc -l", "ok": False}
     output = buf.getvalue()
     assert "action blocked" in output.lower()
@@ -934,11 +938,11 @@ def test_execute_cli_actions_blocks_ambiguous_shell_operators() -> None:
 
 def test_compound_prompt_plans_chat_list_and_blocked_deploy() -> None:
     message = "show versions AND show services AND opensre agent"
-    planned = plan_cli_actions(message)
+    planned = agent_actions.plan_cli_actions(message)
     assert "agent" in planned
     session = ReplSession()
     console, buf = _capture()
-    result = execute_cli_actions("opensre agent", session, console)
+    result = agent_actions.execute_cli_actions("opensre agent", session, console)
     assert result is True
     output = buf.getvalue()
     assert "blocked" in output.lower()
@@ -947,7 +951,9 @@ def test_compound_prompt_plans_chat_list_and_blocked_deploy() -> None:
 def test_execute_cli_actions_handles_path_with_spaces_run_phrase() -> None:
     session = ReplSession()
     console, buf = _capture()
-    result = execute_cli_actions('run cat "/tmp/file with spaces.txt"', session, console)
+    result = agent_actions.execute_cli_actions(
+        'run cat "/tmp/file with spaces.txt"', session, console
+    )
     assert result is True
     assert session.history[-1]["type"] == "shell"
     output = buf.getvalue()
@@ -971,7 +977,10 @@ def test_execute_cli_actions_backtick_shell_preserves_space_path_token(monkeypat
     session = ReplSession()
     console, _ = _capture()
 
-    assert execute_cli_actions('run `cat "/tmp/file with spaces.txt"`', session, console) is True
+    assert (
+        agent_actions.execute_cli_actions('run `cat "/tmp/file with spaces.txt"`', session, console)
+        is True
+    )
     # On Windows, shlex with posix=False preserves quotes for tokens with spaces.
     expected_path = (
         '"/tmp/file with spaces.txt"'
@@ -985,7 +994,7 @@ def test_execute_cli_actions_rejects_malformed_shell_input() -> None:
     session = ReplSession()
     console, buf = _capture()
 
-    assert execute_cli_actions('run `cat "unterminated`', session, console) is True
+    assert agent_actions.execute_cli_actions('run `cat "unterminated`', session, console) is True
     assert session.history[-1] == {"type": "shell", "text": 'cat "unterminated', "ok": False}
     output = buf.getvalue()
     assert "action blocked" in output.lower()
@@ -1011,7 +1020,7 @@ def test_execute_cli_actions_with_metrics_counts_planned_and_executed(monkeypatc
 
     session = ReplSession()
     console, _ = _capture()
-    result = execute_cli_actions_with_metrics("run `pwd`", session, console)
+    result = agent_actions.execute_cli_actions_with_metrics("run `pwd`", session, console)
 
     assert result.handled is True
     assert result.planned_count == 1

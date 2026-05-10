@@ -6,8 +6,8 @@ from unittest.mock import patch
 
 import pytest
 
-import app.cli.interactive_shell.orchestration.action_planner as action_planner_module
 from app.cli.interactive_shell.orchestration.action_planner import (
+    _list_rds_postgres_scenarios,
     plan_actions_with_unhandled,
     plan_cli_actions,
     plan_terminal_tasks,
@@ -82,7 +82,7 @@ def test_plan_typoed_synthetic_test_with_explicit_scenario_id() -> None:
 @pytest.fixture()
 def _clear_scenario_cache() -> None:
     """Drop the lru_cache so each test sees a fresh scenario list snapshot."""
-    action_planner_module._list_rds_postgres_scenarios.cache_clear()
+    _list_rds_postgres_scenarios.cache_clear()
 
 
 @pytest.mark.parametrize(

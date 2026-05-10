@@ -40,8 +40,17 @@ _SYNTHETIC_SCENARIO_ID_RE = re.compile(
 )
 DEFAULT_SYNTHETIC_SCENARIO = "001-replication-lag"
 
+# ``parents[4]`` is the repo root. The earlier ``parents[3]`` survived from
+# when this module lived in the flat ``interactive_shell/`` layout, and after
+# the move into ``orchestration/`` it silently resolved to ``app/`` —
+# ``_list_rds_postgres_scenarios()`` then always returned an empty tuple, the
+# LLM scenario resolver received an empty allowlist, and every fuzzy
+# synthetic-test request fell back to ``DEFAULT_SYNTHETIC_SCENARIO``
+# regardless of what the user typed. Counting parents from this file:
+#   parents[0] orchestration / parents[1] interactive_shell / parents[2] cli
+#   parents[3] app           / parents[4] <repo root>
 _RDS_POSTGRES_SUITE_DIR = (
-    Path(__file__).resolve().parents[3] / "tests" / "synthetic" / "rds_postgres"
+    Path(__file__).resolve().parents[4] / "tests" / "synthetic" / "rds_postgres"
 )
 
 
