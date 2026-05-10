@@ -33,6 +33,25 @@ _INTERACTIVE_RELOAD_DEPENDENTS = (
 )
 
 
+def _default_watch_root() -> Path:
+    """Return the ``app/`` directory the coordinator should poll by default.
+
+    ``__file__`` is ``<repo>/app/cli/interactive_shell/runtime/hot_reload.py``,
+    so the repo root is ``parents[4]`` and the watched tree is
+    ``<repo>/app``. The earlier ``parents[3]`` was correct only for the
+    flat ``interactive_shell/`` layout; after the move into ``runtime/``
+    that resolved to ``<repo>/app`` and the appended ``/app`` produced a
+    non-existent ``<repo>/app/app`` path. ``_scan()`` then returned an
+    empty snapshot and ``check_and_reload()`` silently reported "no
+    changes" forever — hot reload looked installed but never fired.
+
+    Counting parents from this file:
+      parents[0] runtime / parents[1] interactive_shell / parents[2] cli
+      parents[3] app     / parents[4] <repo root>
+    """
+    return Path(__file__).resolve().parents[4] / "app"
+
+
 @dataclass(frozen=True)
 class ReloadResult:
     """Summary of one hot reload pass."""
@@ -52,7 +71,7 @@ class HotReloadCoordinator:
         package_prefix: str = "app",
         dependent_modules: tuple[str, ...] = _INTERACTIVE_RELOAD_DEPENDENTS,
     ) -> None:
-        self.watch_root = (watch_root or Path(__file__).resolve().parents[3] / "app").resolve()
+        self.watch_root = (watch_root or _default_watch_root()).resolve()
         self.package_prefix = package_prefix
         self.dependent_modules = dependent_modules
         self._snapshot = self._scan()

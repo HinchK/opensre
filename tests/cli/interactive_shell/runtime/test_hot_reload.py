@@ -9,7 +9,10 @@ from pathlib import Path
 import pytest
 from rich.console import Console
 
-from app.cli.interactive_shell.runtime.hot_reload import HotReloadCoordinator
+from app.cli.interactive_shell.runtime.hot_reload import (
+    HotReloadCoordinator,
+    _default_watch_root,
+)
 
 
 def _console() -> tuple[Console, io.StringIO]:
@@ -144,3 +147,23 @@ def test_hot_reload_reports_reload_errors(tmp_path: Path) -> None:
         sys.path.remove(str(tmp_path))
         sys.modules.pop("demoapp.broken", None)
         sys.modules.pop("demoapp", None)
+
+
+def test_default_watch_root_points_at_app_directory() -> None:
+    """Regression: the implicit ``HotReloadCoordinator()`` watch_root must exist.
+
+    Before the ``runtime/`` subpackage move the default was
+    ``Path(__file__).parents[3] / "app"``, which after the move silently
+    resolved to ``<repo>/app/app`` — a non-existent path. ``_scan()`` then
+    returned an empty snapshot and ``check_and_reload()`` always reported
+    "no changes", so hot reload looked wired up but never fired in
+    production. This test pins the corrected ``parents[4]`` so the same
+    bug can't reappear if the module ever moves again.
+    """
+    root = _default_watch_root()
+    assert root.is_dir(), f"default watch_root {root} should resolve to the live app/ tree"
+    assert root.name == "app", f"default watch_root should be the app/ directory, got {root}"
+    # The coordinator instantiated with no kwargs should also pick the same
+    # directory and not crash on ``_scan()``.
+    coordinator = HotReloadCoordinator()
+    assert coordinator.watch_root == root.resolve()
