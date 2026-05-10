@@ -18,11 +18,20 @@ expressions without re-implementing fuzzy keyword search; an LLM call is the
 appropriate primitive.
 
 Design constraints mirror ``llm_intent_classifier``:
-- Uses the lightweight toolcall model (Haiku / GPT-4o-mini) for cost-efficiency.
+- Uses the mid-tier classification model (Claude Sonnet / GPT-5 mini /
+  Gemini Flash) via :func:`app.services.llm_client.get_llm_for_classification`.
+  Sonnet-class models follow the strict allowlist + ``NONE``-sentinel rules
+  substantially more reliably than Haiku-tier toolcall models, which were
+  observed to hallucinate the closest-looking scenario (e.g. "001-...") for
+  out-of-range numeric IDs ("test 016") instead of returning ``NONE`` and
+  letting the caller fall back to the default.
 - Returns ``None`` on any failure (model unavailable, timeout, parse error,
   hallucinated scenario name) so the caller can fall back to the default.
 - Only successful resolutions are cached; transient failures are evicted.
-- User text is sanitised before being embedded to prevent prompt injection.
+- User text is sanitised before being embedded between the prompt's
+  ``<<<``/``>>>`` delimiters to neutralise the delimiter-escape variant of
+  prompt injection. The hallucinated-scenario protection in
+  :func:`_parse_scenario` (allowlist-bound) is the second line of defence.
 - LLM resolution can be disabled with ``OPENSRE_DISABLE_LLM_SCENARIO_RESOLUTION``
   for offline / zero-latency test runs.
 """
@@ -82,18 +91,34 @@ _SCENARIO_NAME_RE = re.compile(r"\b(\d{3}-[a-z0-9][a-z0-9-]*)\b", re.IGNORECASE)
 
 
 def _sanitise_text(text: str) -> str:
-    """Truncate and strip control characters that could influence the prompt."""
+    """Make user text safe to embed between the ``<<<``/``>>>`` prompt delimiters.
+
+    Mirrors the sanitiser in ``llm_intent_classifier`` — see that module's
+    docstring for the full rationale. In this resolver the worst-case impact
+    of an unmitigated injection is a wrong scenario directory being launched
+    (still bounded to the live allowlist by ``_parse_scenario``), but we
+    neutralise the delimiter vector for defence-in-depth.
+
+    Steps:
+
+    1. Strip control characters that the tokenizer might mishandle.
+    2. Collapse any run of three-or-more ``<`` or ``>`` characters to a single
+       space so the literal ``<<<``/``>>>`` delimiters can't be escaped from
+       the inside.
+    3. Truncate to ``_MAX_TEXT_LEN``.
+    """
     sanitised = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
+    sanitised = re.sub(r"<{3,}|>{3,}", " ", sanitised)
     return sanitised[:_MAX_TEXT_LEN]
 
 
 def _call_llm(sanitised_text: str, scenarios: tuple[str, ...]) -> str | None:
-    """Call the lightweight toolcall LLM and return the raw response text.
+    """Call the mid-tier classification LLM and return the raw response text.
 
     Returns ``None`` if the LLM client is unavailable or raises any exception.
     """
     try:
-        from app.services.llm_client import get_llm_for_tools
+        from app.services.llm_client import get_llm_for_classification
     except Exception:
         logger.debug("llm_synthetic_scenario_resolver: LLM client import failed; skipping")
         return None
@@ -107,7 +132,7 @@ def _call_llm(sanitised_text: str, scenarios: tuple[str, ...]) -> str | None:
     prompt = f"{system}\n{user_message}"
 
     try:
-        client = get_llm_for_tools()
+        client = get_llm_for_classification()
         response = client.invoke(prompt)
         return response.content.strip()
     except Exception as exc:
