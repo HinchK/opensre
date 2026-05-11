@@ -106,7 +106,9 @@ def parse_shard(raw: str | None) -> ShardSpec:
     return ShardSpec(index=index, total=total)
 
 
-def select_fixtures(fixtures: list[ScenarioFixture], config: SuiteRunConfig) -> list[ScenarioFixture]:
+def select_fixtures(
+    fixtures: list[ScenarioFixture], config: SuiteRunConfig
+) -> list[ScenarioFixture]:
     selected = fixtures
 
     if config.scenario:
@@ -117,12 +119,11 @@ def select_fixtures(fixtures: list[ScenarioFixture], config: SuiteRunConfig) -> 
 
     selected_levels = set(config.levels)
     selected = [
-        fixture
-        for fixture in selected
-        if fixture.metadata.scenario_difficulty in selected_levels
+        fixture for fixture in selected if fixture.metadata.scenario_difficulty in selected_levels
     ]
 
     if config.shard.total > 1:
+
         def _stable_mod(text: str, mod: int) -> int:
             digest = sha256(text.encode("utf-8")).digest()
             return int.from_bytes(digest[:8], "big") % mod

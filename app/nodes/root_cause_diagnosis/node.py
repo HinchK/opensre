@@ -41,7 +41,8 @@ def _has_untried_actions(state: InvestigationState) -> bool:
         return False
     blocked = _blocked_action_names(state.get("executed_hypotheses", []))
     return any(
-        isinstance(action_name, str) and action_name not in blocked for action_name in available_actions
+        isinstance(action_name, str) and action_name not in blocked
+        for action_name in available_actions
     )
 
 

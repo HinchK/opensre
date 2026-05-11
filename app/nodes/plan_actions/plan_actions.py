@@ -53,11 +53,7 @@ def _seed_action_names_for_sources(
     if "ec2" in available_sources:
         seeded.append("ec2_instances_by_tag")
         ec2 = available_sources.get("ec2", {})
-        if (
-            ec2.get("target_group_arns")
-            or ec2.get("load_balancer_arns")
-            or ec2.get("_backend")
-        ):
+        if ec2.get("target_group_arns") or ec2.get("load_balancer_arns") or ec2.get("_backend"):
             seeded.append("get_elb_target_health")
 
     if "rds" in available_sources and "grafana" in available_sources:

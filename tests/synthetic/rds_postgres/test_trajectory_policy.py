@@ -312,7 +312,6 @@ def test_returns_none_when_policy_is_none() -> None:
 
 def test_trajectory_policy_gate_present_on_pass() -> None:
     """Gates must contain 'trajectory_policy' with status='pass' for a passing policy."""
-    from tests.synthetic.rds_postgres.observations import compute_trajectory_metrics
     from tests.synthetic.rds_postgres.run_suite import (
         _apply_trajectory_policy_to_score,
         score_result,
