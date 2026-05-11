@@ -431,7 +431,9 @@ class BedrockLLMClient:
                     # ``INVALID_PAYMENT_INSTRUMENT``). Surface the upstream
                     # AWS-provided reason so the user knows which one to fix
                     # — see issue #1808.
-                    aws_message = str(err.response.get("Error", {}).get("Message", "")).strip().rstrip(".")
+                    aws_message = (
+                        str(err.response.get("Error", {}).get("Message", "")).strip().rstrip(".")
+                    )
                     detail = f" Cause: {aws_message}." if aws_message else ""
                     raise RuntimeError(
                         f"Access denied for Bedrock model '{self._model}'.{detail} "
@@ -686,6 +688,12 @@ class OpenAILLMClient:
                     "Check your configured model name or endpoint."
                 ) from err
             except OpenAIBadRequestError as err:
+                _msg = (err.message or "").lower()
+                if "model" in _msg and "invalid" in _msg:
+                    raise RuntimeError(
+                        f"{self._provider_label} model '{self._model}' was not found. "
+                        "Check your configured model name or endpoint."
+                    ) from err
                 raise RuntimeError(
                     f"{self._provider_label} request rejected (HTTP 400): {err.message}"
                 ) from err
@@ -770,6 +778,12 @@ class OpenAILLMClient:
                     "Check your configured model name or endpoint."
                 ) from err
             except OpenAIBadRequestError as err:
+                _msg = (err.message or "").lower()
+                if "model" in _msg and "invalid" in _msg:
+                    raise RuntimeError(
+                        f"{self._provider_label} model '{self._model}' was not found. "
+                        "Check your configured model name or endpoint."
+                    ) from err
                 raise RuntimeError(
                     f"{self._provider_label} request rejected (HTTP 400): {err.message}"
                 ) from err
