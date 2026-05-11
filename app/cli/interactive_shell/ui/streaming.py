@@ -242,7 +242,19 @@ def stream_to_console(
             try:
                 wrap_patch_stdout = _console_file_is_a_tty(console)
                 try:
-                    _run_throttled_with_live(wrap_patch_stdout=wrap_patch_stdout)
+                    if wrap_patch_stdout:
+                        _run_throttled_with_live(wrap_patch_stdout=True)
+                    else:
+                        # ``force_terminal=True`` with a non-TTY file (StringIO /
+                        # captured test buffer) leaves live refresh artifacts in
+                        # scrollback. Skip in-flight previews there and render once
+                        # at finalize for deterministic output.
+                        _run_throttled_markdown_loop(
+                            preview=_noop_preview,
+                            chunks_iter=chunks_iter,
+                            buffer=buffer,
+                            next_chunk=_next_chunk,
+                        )
                 except NoConsoleScreenBufferError:
                     if wrap_patch_stdout:
                         try:

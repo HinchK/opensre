@@ -52,7 +52,13 @@ InputKind = Literal["slash", "cli_help", "cli_agent", "new_alert", "follow_up"]
 
 # Rule names that are part of the deterministic fast-path and must never be
 # handed to the LLM classifier (they are always correct by definition).
-_FAST_PATH_RULE_NAMES: frozenset[str] = frozenset({"slash_prefix", "bare_command_alias"})
+#
+# "sample_alert_launch" is intentionally included to keep built-in sample alert
+# actions deterministic even when the LLM classifier is noisy around the word
+# "alert".
+_FAST_PATH_RULE_NAMES: frozenset[str] = frozenset(
+    {"slash_prefix", "bare_command_alias", "sample_alert_launch"}
+)
 
 
 def _is_slash_prefix(text: str, _session: RoutingSession) -> bool:
