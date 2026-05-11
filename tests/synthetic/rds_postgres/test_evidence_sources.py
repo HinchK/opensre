@@ -22,6 +22,7 @@ from tests.synthetic.rds_postgres.evidence_sources import (
 # Helpers: fabricate final_state with specific evidence patterns
 # ---------------------------------------------------------------------------
 
+
 def _state_with_cloudwatch_only() -> dict[str, Any]:
     """Agent gathered CloudWatch metrics but NOT Performance Insights."""
     return {
@@ -58,9 +59,7 @@ def _state_with_pi_only() -> dict[str, Any]:
                 "observations": [
                     "Top SQL Activity: SELECT * FROM orders | Avg Load: 3.5 AAS | Waits: CPU"
                 ],
-                "top_sql": [
-                    {"sql": "SELECT * FROM orders", "db_load": 3.5, "wait_event": "CPU"}
-                ],
+                "top_sql": [{"sql": "SELECT * FROM orders", "db_load": 3.5, "wait_event": "CPU"}],
                 "top_wait_events": [{"name": "CPU", "db_load": 3.5}],
                 "db_load": {"timestamps": ["2024-01-01T00:00:00Z"], "values": [3.5]},
             },
@@ -196,9 +195,7 @@ def test_rds_events_detected_via_grafana_logs() -> None:
 
 def test_rds_events_detected_via_direct_key() -> None:
     state = {
-        "evidence": {
-            "aws_rds_events": [{"message": "DB instance restarted", "date": "2024-01-01"}]
-        }
+        "evidence": {"aws_rds_events": [{"message": "DB instance restarted", "date": "2024-01-01"}]}
     }
     results = evaluate(state, [EvidenceSourceId.AWS_RDS_EVENTS.value])
     assert results[0].present is True

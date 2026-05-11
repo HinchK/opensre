@@ -399,7 +399,9 @@ def _build_evidence(
 
     if "k8s_dns_metrics" in available_evidence:
         path = _resolve_evidence_path(scenario_dir, base_dir, "k8s_dns_metrics.json")
-        k8s_dns_metrics = validate_generic_evidence(_read_json(path), filename="k8s_dns_metrics.json")
+        k8s_dns_metrics = validate_generic_evidence(
+            _read_json(path), filename="k8s_dns_metrics.json"
+        )
 
     if "k8s_mesh_metrics" in available_evidence:
         path = _resolve_evidence_path(scenario_dir, base_dir, "k8s_mesh_metrics.json")

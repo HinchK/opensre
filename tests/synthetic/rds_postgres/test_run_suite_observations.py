@@ -288,7 +288,9 @@ def test_run_suite_single_scenario_keeps_investigation_rendering_mode(
 
     monkeypatch.setattr(run_suite_module, "run_scenario", _fake_run_scenario)
 
-    run_suite_module.run_suite(["--scenario", fixture.scenario_id, "--observations-dir", str(tmp_path)])
+    run_suite_module.run_suite(
+        ["--scenario", fixture.scenario_id, "--observations-dir", str(tmp_path)]
+    )
 
     assert output_formats_seen == [None]
 
