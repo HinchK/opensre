@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from datetime import datetime
 from typing import Any
 
@@ -12,6 +14,12 @@ from app.hermes.sinks import TelegramSink, TelegramSinkConfig, make_telegram_sin
 from app.watch_dog.alarms import AlarmCredentials, AlarmDispatcher
 
 _TS = datetime(2026, 5, 12, 0, 0, 0)
+
+
+# Default test config: run the bridge inline so unit tests are
+# deterministic. The pooled path is exercised separately by
+# TestPooledBridge to keep its slower/race-sensitive tests scoped.
+_INLINE = TelegramSinkConfig(bridge_run_inline=True)
 
 
 def _record(level: LogLevel, logger_name: str, message: str) -> LogRecord:
@@ -117,7 +125,7 @@ class TestSeverityRouting:
             bridge_calls.append(incident)
             return "root cause: redis is down"
 
-        sink = TelegramSink(dispatcher, investigation_bridge=_bridge)
+        sink = TelegramSink(dispatcher, investigation_bridge=_bridge, config=_INLINE)
         sink(_incident(severity=IncidentSeverity.HIGH))
 
         assert len(bridge_calls) == 1
@@ -134,7 +142,7 @@ class TestSeverityRouting:
             bridge_calls.append(incident)
             return "root cause: oom kill"
 
-        sink = TelegramSink(dispatcher, investigation_bridge=_bridge)
+        sink = TelegramSink(dispatcher, investigation_bridge=_bridge, config=_INLINE)
         sink(_incident(severity=IncidentSeverity.CRITICAL))
 
         assert len(bridge_calls) == 1
@@ -150,7 +158,7 @@ class TestSeverityRouting:
             bridge_calls.append(incident)
             return "should not appear"
 
-        sink = TelegramSink(dispatcher, investigation_bridge=_bridge)
+        sink = TelegramSink(dispatcher, investigation_bridge=_bridge, config=_INLINE)
         sink(_incident(severity=IncidentSeverity.MEDIUM, rule="warning_burst"))
 
         assert bridge_calls == []
@@ -158,32 +166,97 @@ class TestSeverityRouting:
         assert "investigation summary:" not in text
         assert "notify only" in text
 
-    def test_bridge_returning_none_omits_summary_section(
+    def test_bridge_returning_none_marks_attempted_no_summary(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """Operator must be able to distinguish 'no bridge configured'
+        from 'bridge ran and returned nothing' — Greptile #1858 P2."""
         dispatcher, calls = _dispatcher(monkeypatch)
 
         def _bridge(_incident: HermesIncident) -> str | None:
             return None
 
-        sink = TelegramSink(dispatcher, investigation_bridge=_bridge)
+        sink = TelegramSink(dispatcher, investigation_bridge=_bridge, config=_INLINE)
         sink(_incident(severity=IncidentSeverity.CRITICAL))
 
-        assert "investigation summary:" not in calls[0]["text"]
+        text = calls[0]["text"]
+        assert "investigation summary:" not in text
+        assert "investigation: attempted (no summary produced)" in text
 
-    def test_bridge_exception_is_swallowed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_bridge_exception_is_marked_attempted_failed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Bridge exceptions must surface a 'failed' marker on Telegram
+        so operators don't conflate them with 'investigation disabled'."""
         dispatcher, calls = _dispatcher(monkeypatch)
 
         def _bridge(_incident: HermesIncident) -> str | None:
             raise RuntimeError("LLM unreachable")
 
-        sink = TelegramSink(dispatcher, investigation_bridge=_bridge)
+        sink = TelegramSink(dispatcher, investigation_bridge=_bridge, config=_INLINE)
         # Must not raise — a broken investigation pipeline cannot block
         # notification delivery.
         sink(_incident(severity=IncidentSeverity.HIGH))
 
         assert len(calls) == 1
-        assert "investigation summary:" not in calls[0]["text"]
+        text = calls[0]["text"]
+        assert "investigation summary:" not in text
+        assert "investigation: attempted (failed" in text
+
+    def test_high_incident_without_bridge_omits_investigation_section(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When no bridge is configured at all, no investigation block
+        is emitted (the markers are reserved for bridge-attempted states)."""
+        dispatcher, calls = _dispatcher(monkeypatch)
+        sink = TelegramSink(dispatcher)
+        sink(_incident(severity=IncidentSeverity.HIGH))
+
+        text = calls[0]["text"]
+        assert "investigation summary:" not in text
+        assert "investigation: attempted" not in text
+
+
+class TestPooledBridge:
+    """Verify the pooled bridge execution path: timeouts must surface
+    as an explicit marker, and the call must not block longer than
+    ``bridge_timeout_s`` even when the bridge hangs."""
+
+    def test_bridge_timeout_marks_attempted_timed_out_and_does_not_block(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        dispatcher, calls = _dispatcher(monkeypatch)
+        bridge_started = threading.Event()
+        bridge_release = threading.Event()
+
+        def _slow_bridge(_incident: HermesIncident) -> str | None:
+            bridge_started.set()
+            # Block until released so the test deterministically hits
+            # the timeout path. The future is left running on timeout;
+            # we release it at teardown so the worker thread exits.
+            bridge_release.wait(timeout=5.0)
+            return "too late"
+
+        # 50 ms timeout keeps the test fast while still exercising the
+        # pooled (off-thread) code path.
+        config = TelegramSinkConfig(bridge_timeout_s=0.05, bridge_workers=1)
+        sink = TelegramSink(dispatcher, investigation_bridge=_slow_bridge, config=config)
+        try:
+            start = time.monotonic()
+            sink(_incident(severity=IncidentSeverity.CRITICAL))
+            elapsed = time.monotonic() - start
+
+            # Must return well under the bridge's own would-be runtime.
+            # Generous upper bound to absorb CI scheduling noise.
+            assert elapsed < 1.0, f"sink blocked for {elapsed:.2f}s; expected <1.0s"
+            assert bridge_started.is_set(), "bridge worker never started"
+            text = calls[0]["text"]
+            assert "investigation summary:" not in text
+            assert "investigation: attempted (timed out after" in text
+            assert "too late" not in text  # late return must be discarded
+        finally:
+            bridge_release.set()
+            sink.close()
 
 
 class TestDispatcherIntegration:
@@ -220,7 +293,7 @@ class TestDispatcherIntegration:
             bridge_calls.append(incident)
             return "RCA"
 
-        sink = make_telegram_sink(dispatcher, investigation_bridge=_bridge)
+        sink = make_telegram_sink(dispatcher, investigation_bridge=_bridge, config=_INLINE)
         sink(_incident(severity=IncidentSeverity.HIGH))
 
         assert callable(sink)

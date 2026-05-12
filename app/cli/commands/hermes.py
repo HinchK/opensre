@@ -127,6 +127,10 @@ def hermes_watch(
     finally:
         click.echo("hermes-watch: stopping…")
         agent.stop()
+        # Drain in-flight investigation calls (no-op when bridge is
+        # disabled). Done after agent.stop() so no new bridge submits
+        # can race the shutdown.
+        sink.close()
         click.echo("hermes-watch: stopped.")
 
 
