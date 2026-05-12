@@ -341,9 +341,7 @@ def _read_segment(
 
             passes_level = level_filter is None or record.level in level_filter
             passes_since = not (
-                since is not None
-                and record.timestamp < since
-                and not record.is_continuation
+                since is not None and record.timestamp < since and not record.is_continuation
             )
             would_return = passes_level and passes_since
             # If this line would become the (max_lines+1)th returned record,

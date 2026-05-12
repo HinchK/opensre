@@ -211,7 +211,9 @@ class TestMaxLines:
             classifier=IncidentClassifier(),
         )
         assert len(second.records) == 1
-        err_incidents = [i for i in first.incidents + second.incidents if i.rule == "error_severity"]
+        err_incidents = [
+            i for i in first.incidents + second.incidents if i.rule == "error_severity"
+        ]
         assert len(err_incidents) == 3
         assert len({i.fingerprint for i in err_incidents}) == 3
 
