@@ -335,8 +335,8 @@ def _read_segment(
             line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
 
             record = parse_log_line(line, prev_level=prev_level)
-            new_offset = handle.tell()
             if record is None:
+                new_offset = handle.tell()
                 continue
 
             passes_level = level_filter is None or record.level in level_filter
@@ -365,6 +365,7 @@ def _read_segment(
                 handle.seek(line_start)
                 break
 
+            new_offset = handle.tell()
             parsed_count += 1
             if not record.is_continuation:
                 prev_level = record.level
