@@ -1,0 +1,2 @@
+2026-05-11 12:00:01,100 WARNING agent.context: estimated tokens=180000 > model.context_length=32768
+2026-05-11 12:00:01,500 ERROR agent.run_agent: provider returned 400: prompt exceeds model maximum context length of 32768 tokens

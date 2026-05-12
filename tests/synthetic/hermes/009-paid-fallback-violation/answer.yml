@@ -1,0 +1,7 @@
+expected_incidents:
+  - rule: "error_severity"
+    severity: "high"
+    logger: "agent.aux_fallback"
+
+expected_incident_count:
+  error_severity: "==1"

@@ -1,0 +1,2 @@
+2026-05-11 22:00:00,000 WARNING agent.aux_fallback: free model 'openrouter/free-aux' returned 429; falling back to 'openrouter/paid-aux' (rate=$0.50/Mtok)
+2026-05-11 22:00:01,000 ERROR agent.aux_fallback: auxiliary fallback chose paid model 'openrouter/paid-aux' while OPENROUTER_FREE_ONLY=1 — request was not free-only

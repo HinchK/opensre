@@ -1,0 +1,5 @@
+2026-05-12 00:14:54,000 ERROR gateway.runner: refusing to start: PID lock 41827 appears active (no /proc on macOS, falling back to kill -0)
+2026-05-12 00:14:54,100 ERROR gateway.runner: Traceback (most recent call last):
+  File "/opt/hermes/gateway/runner.py", line 121, in acquire_lock
+    raise RuntimeError(f"stale PID {pid} appears live; remove {self.lock_path} manually")
+RuntimeError: stale PID 41827 appears live; remove /Users/x/.hermes/gateway.pid manually

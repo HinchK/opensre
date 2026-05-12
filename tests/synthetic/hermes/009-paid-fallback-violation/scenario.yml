@@ -1,0 +1,4 @@
+scenario_id: "009-paid-fallback-violation"
+title: "Auxiliary task fell back to paid OpenRouter model despite free-only config (#24029)"
+source: "issue-24029"
+log_file: "errors.log"

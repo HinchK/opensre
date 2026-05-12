@@ -1,0 +1,4 @@
+scenario_id: "006-adapter-attribute-error"
+title: "LINE adapter AttributeError on init (#23728)"
+source: "issue-23728"
+log_file: "errors.log"
