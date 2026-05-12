@@ -18,9 +18,9 @@ Usage::
     agent = HermesAgent(..., incident_sink=sink)
 
 Incidents bound for :attr:`RouteDestination.DROP` are counted but
-never forwarded. Routes that aren't registered are logged at INFO
-once per (rule, destination) pair so misconfiguration is visible
-without flooding the logs.
+never forwarded. Routes that aren't registered are logged at WARNING
+once per (rule, destination) pair so misconfiguration is visible under
+typical production log thresholds without flooding the logs.
 """
 
 from __future__ import annotations
@@ -73,6 +73,7 @@ class CorrelatingSink:
             "escalated": 0,
             "dropped": 0,
             "unrouted": 0,
+            "sink_errors": 0,
         }
 
     def __call__(self, incident: HermesIncident) -> None:
@@ -109,9 +110,16 @@ class CorrelatingSink:
                 incident.rule,
                 decision.destination.value,
             )
+            with self._lock:
+                self._metrics["sink_errors"] += 1
 
     def metrics_snapshot(self) -> dict[str, int]:
-        """Return a copy of the running counters. Useful for ops dashboards."""
+        """Return a copy of the running counters. Useful for ops dashboards.
+
+        Keys: ``delivered``, ``suppressed``, ``escalated``, ``dropped``,
+        ``unrouted`` (no handler for destination), ``sink_errors`` (downstream
+        sink raised).
+        """
         with self._lock:
             return dict(self._metrics)
 
@@ -144,7 +152,7 @@ class CorrelatingSink:
             if key in self._missing_warned:
                 return
             self._missing_warned.add(key)
-        logger.info(
+        logger.warning(
             "no sink registered for destination=%s (rule=%s); dropping",
             destination.value,
             rule,

@@ -211,7 +211,8 @@ def hermes_watch(
                 f"suppressed={snapshot['suppressed']} "
                 f"escalated={snapshot['escalated']} "
                 f"dropped={snapshot['dropped']} "
-                f"unrouted={snapshot['unrouted']}"
+                f"unrouted={snapshot['unrouted']} "
+                f"sink_errors={snapshot['sink_errors']}"
             )
         click.echo("hermes-watch: stopped.")
 

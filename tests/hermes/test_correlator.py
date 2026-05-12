@@ -215,7 +215,7 @@ class TestCorrelatingSink:
     def test_missing_route_increments_unrouted_metric(self, caplog) -> None:
         corr = IncidentCorrelator()
         sink = CorrelatingSink(correlator=corr, routes={})
-        with caplog.at_level("INFO", logger="app.hermes.correlating_sink"):
+        with caplog.at_level("WARNING", logger="app.hermes.correlating_sink"):
             sink(_incident())
         snapshot = sink.metrics_snapshot()
         assert snapshot["delivered"] == 0
@@ -230,6 +230,8 @@ class TestCorrelatingSink:
         sink = CorrelatingSink(correlator=corr, routes={RouteDestination.TELEGRAM_WITH_RCA: boom})
         # Must not raise:
         sink(_incident())
+        assert sink.metrics_snapshot()["sink_errors"] == 1
+        assert sink.metrics_snapshot()["delivered"] == 0
 
     def test_dedup_window_default_constant_is_documented(self) -> None:
         # Catches anyone tightening the default below the AlarmDispatcher cooldown.
