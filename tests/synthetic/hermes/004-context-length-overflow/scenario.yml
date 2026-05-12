@@ -1,0 +1,4 @@
+scenario_id: "004-context-length-overflow"
+title: "Oversized prompt after lower-context model switch (#23767, #24000, #24080)"
+source: "issue-23767"
+log_file: "errors.log"

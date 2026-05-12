@@ -1,0 +1,5 @@
+2026-05-11 09:00:00,100 ERROR agent.run_agent: provider returned 400: model 'qwen2.5-coder:7b' does not support image input (image_url passed in messages[3].content)
+2026-05-11 09:00:00,200 ERROR agent.run_agent: Traceback (most recent call last):
+  File "/opt/hermes/agent/run_agent.py", line 740, in _call_llm
+    response = await client.chat.completions.create(**kwargs)
+openai.BadRequestError: 400 Bad Request: model does not support image input

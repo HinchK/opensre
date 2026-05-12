@@ -1,0 +1,13 @@
+expected_incidents:
+  - rule: "warning_burst"
+    logger: "agent.session_store"
+  - rule: "error_severity"
+    severity: "high"
+    logger: "agent.session_store"
+  - rule: "traceback"
+    logger: "agent.session_store"
+
+expected_incident_count:
+  warning_burst: ">=1"
+  error_severity: ">=1"
+  traceback: ">=1"

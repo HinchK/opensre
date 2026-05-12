@@ -1,0 +1,4 @@
+scenario_id: "002-gateway-systemd-crash-loop"
+title: "Gateway crash loop after upgrade (systemd Result=exit-code, Status=1)"
+source: "gateway-troubleshooting-docs"
+log_file: "errors.log"
