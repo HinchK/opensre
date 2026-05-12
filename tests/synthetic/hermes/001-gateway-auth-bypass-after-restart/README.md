@@ -1,12 +1,14 @@
-# 001-gateway-auth-bypass-after-restart — Telegram polling conflict storm + gateway restart processes unauthorized message (#23778)
+# 001-gateway-auth-bypass-after-restart — Telegram polling conflict + gateway restart processes unauthorized message (#23778)
 
 ## Source
-production-issue-23778
+https://github.com/NousResearch/hermes-agent/issues/23778
 
 ## Notes
-Auth bypass occurred immediately after a polling conflict storm and a gateway restart. P0 security incident — the polling burst should fire first as warning_burst (early warning), and the subsequent ERROR from gateway.auth must surface as error_severity so the on-call is paged before the inverted auth state is observed.
+Real timeline from issue #23778 (P0 security): four Telegram polling conflicts in a ~5 minute window, gateway restart, then the **first inbound batch after reconnect processes the attacker's message with no "Unauthorized" warning**. The polling burst must fire as `warning_burst` to give on-call lead time, and the trailing `auth bypass` ERROR must fire as `error_severity` so it pages immediately. `traceback` count is asserted to be **zero** to catch any regression that mis-classifies the bypass logline as a continuation frame.
 
 ## Fixture
-`errors.log` is a synthesized minimal log slice that exercises the
-Hermes classifier on this failure mode. Lines and timestamps are
-deterministic so the answer key remains stable across CI runs.
+`errors.log` is reproduced from the cited issue with minimal
+reformatting to match Hermes's standard `logging` output
+(timestamp + LEVEL + logger + message). Lines, loggers, and key
+message text are taken **verbatim** from the bug report so the
+classifier is exercised on real Hermes log shapes.

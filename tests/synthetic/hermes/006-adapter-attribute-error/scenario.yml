@@ -1,4 +1,4 @@
 scenario_id: "006-adapter-attribute-error"
-title: "LINE adapter AttributeError on init (#23728)"
-source: "issue-23728"
+title: "LINE adapter AttributeError: no create_source (typo for build_source) (#23728)"
+source: "https://github.com/NousResearch/hermes-agent/issues/23728"
 log_file: "errors.log"

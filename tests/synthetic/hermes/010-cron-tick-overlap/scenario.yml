@@ -1,6 +1,6 @@
 scenario_id: "010-cron-tick-overlap"
-title: "Cron tick lock contention + weekly_maintenance hardcoded path (#24034, #24035)"
-source: "issues-24034-24035"
+title: "cron .tick.lock held by stuck pid + weekly_maintenance hardcoded path (#24034, #24035)"
+source: "https://github.com/NousResearch/hermes-agent/issues/24035"
 log_file: "errors.log"
 classifier:
   warning_burst_threshold: 3

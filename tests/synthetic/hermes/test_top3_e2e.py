@@ -153,12 +153,28 @@ def test_e2e_001_gateway_auth_bypass_after_restart(
     assert "error_severity" in rules, f"expected gateway.auth error_severity, got rules={rules}"
 
     # The auth bypass ERROR must reach Telegram — this is the P0 alert.
+    # Issue #23778 specifies the bypass surfaces via `gateway.auth` with
+    # the phrase "auth bypass" in the message body.
     auth_alerts = [
         call for call in calls if "gateway.auth" in call["text"] and "auth bypass" in call["text"]
     ]
     assert auth_alerts, (
         "P0 auth-bypass ERROR was not delivered to Telegram; "
         f"got {len(calls)} call(s): {[c['text'][:80] for c in calls]}"
+    )
+
+    # The polling-conflict burst must also reach Telegram. Per the
+    # AlarmDispatcher contract, distinct fingerprints bypass cooldown so
+    # both incidents land — verified by counting calls with each
+    # fingerprint distinctly present in the message body.
+    burst_alerts = [
+        call
+        for call in calls
+        if "warning_burst" in call["text"] and "polling conflict" in call["text"]
+    ]
+    assert burst_alerts, (
+        "polling-conflict warning_burst alert was not delivered to Telegram; "
+        f"got {len(calls)} call(s)"
     )
 
 
@@ -201,6 +217,15 @@ def test_e2e_002_gateway_systemd_crash_loop(
         f"exits into a single Telegram send; got {len(crashloop_calls)}"
     )
 
+    # The traceback Telegram alert must carry the actionable
+    # `ModuleNotFoundError` line — that's the substring an operator
+    # greps for to find the fix.
+    traceback_alerts = [c for c in calls if "ModuleNotFoundError" in c["text"]]
+    assert traceback_alerts, (
+        "traceback alert did not include the actionable ModuleNotFoundError "
+        f"line; got call texts: {[c['text'][:160] for c in calls]}"
+    )
+
 
 # ---------------------------------------------------------------------
 # Scenario 003 — state.db WAL unbounded growth
@@ -238,4 +263,13 @@ def test_e2e_003_state_db_wal_unbounded_growth(
     assert len(fingerprints_in_calls) >= 2, (
         "expected at least two distinct fingerprints delivered to "
         f"Telegram (burst + ERROR); got {fingerprints_in_calls}"
+    )
+
+    # The exact SQLite error string from issue #24034 must reach the
+    # operator chat — that's the line that points at the real fix
+    # (`PRAGMA wal_checkpoint(TRUNCATE)` instead of PASSIVE).
+    disk_full_alerts = [c for c in calls if "database or disk is full" in c["text"]]
+    assert disk_full_alerts, (
+        "expected the real SQLite OperationalError string from #24034 in "
+        f"a Telegram alert; got {len(calls)} call(s)"
     )

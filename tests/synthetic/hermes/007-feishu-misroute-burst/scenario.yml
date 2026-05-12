@@ -1,7 +1,7 @@
 scenario_id: "007-feishu-misroute-burst"
-title: "Feishu group replies misrouted to sender's DM (#23698, #23732)"
-source: "issue-23698"
+title: "Feishu group replies reach sender DM despite chat_id log (#23698, #23732)"
+source: "https://github.com/NousResearch/hermes-agent/issues/23698"
 log_file: "errors.log"
 classifier:
   warning_burst_threshold: 4
-  warning_burst_window_s: 120
+  warning_burst_window_s: 600

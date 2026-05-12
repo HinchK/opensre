@@ -1,12 +1,14 @@
-# 009-paid-fallback-violation — Auxiliary task fell back to paid OpenRouter model despite free-only config (#24029)
+# 009-paid-fallback-violation — Auxiliary fallback ignores :free constraint and hits paid model 403 (#24029)
 
 ## Source
-issue-24029
+https://github.com/NousResearch/hermes-agent/issues/24029
 
 ## Notes
-User configured free-only but auxiliary chain bypassed the constraint. A single ERROR is sufficient to alert.
+Verbatim logger names and 403 error string from issue #24029. The WARNING (title_generator) and ERROR (auxiliary_client) come from **different loggers** — this scenario exists in part to catch any regression that pools warning buckets across loggers and mis-fires `warning_burst`.
 
 ## Fixture
-`errors.log` is a synthesized minimal log slice that exercises the
-Hermes classifier on this failure mode. Lines and timestamps are
-deterministic so the answer key remains stable across CI runs.
+`errors.log` is reproduced from the cited issue with minimal
+reformatting to match Hermes's standard `logging` output
+(timestamp + LEVEL + logger + message). Lines, loggers, and key
+message text are taken **verbatim** from the bug report so the
+classifier is exercised on real Hermes log shapes.

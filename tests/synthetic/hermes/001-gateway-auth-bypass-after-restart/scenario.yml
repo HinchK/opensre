@@ -1,6 +1,6 @@
 scenario_id: "001-gateway-auth-bypass-after-restart"
-title: "Telegram polling conflict storm + gateway restart processes unauthorized message (#23778)"
-source: "production-issue-23778"
+title: "Telegram polling conflict + gateway restart processes unauthorized message (#23778)"
+source: "https://github.com/NousResearch/hermes-agent/issues/23778"
 log_file: "errors.log"
 classifier:
   warning_burst_threshold: 4

@@ -4,5 +4,6 @@ expected_incidents:
     min_records: 4
 
 expected_incident_count:
-  warning_burst: ">=1"
+  warning_burst: "==1"
   error_severity: "==0"
+  traceback: "==0"

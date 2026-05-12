@@ -1,4 +1,4 @@
 scenario_id: "005-vision-routing-bypass"
-title: "Non-vision model receives image_url, provider returns 400 (#23733, #24015)"
-source: "issue-23733"
+title: "Non-vision model receives image_url on /v1/chat/completions profile branch (#23733)"
+source: "https://github.com/NousResearch/hermes-agent/issues/23733"
 log_file: "errors.log"
