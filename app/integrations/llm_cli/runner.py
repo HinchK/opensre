@@ -180,7 +180,7 @@ class CLIBackedLLMClient:
             # "To resume this session" signals the CLI paused with saved state
             # (e.g. kimi exit 75 / EX_TEMPFAIL).  This is a transient operational
             # condition, not a code bug — raise CLITransientError so Sentry ignores it.
-            if "to resume this session" in message.lower():
+            if "to resume this session" in base.lower():
                 raise CLITransientError(message)
             raise RuntimeError(message)
 

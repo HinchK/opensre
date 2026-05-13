@@ -368,10 +368,10 @@ def _init_sentry_once(
     import sentry_sdk
 
     from app.integrations.llm_cli.errors import (
-            CLIAuthenticationRequired,
-            CLITimeoutError,
-            CLITransientError,
-        )
+        CLIAuthenticationRequired,
+        CLITimeoutError,
+        CLITransientError,
+    )
 
     with _suppress_langgraph_allowed_objects_warning():
         sentry_sdk.init(
