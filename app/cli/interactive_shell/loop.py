@@ -77,7 +77,11 @@ from app.cli.interactive_shell.ui.streaming import (
 )
 from app.cli.support.errors import OpenSREError
 from app.cli.support.exception_reporting import report_exception
-from app.cli.support.prompt_support import repl_prompt_note_ctrl_c, repl_reset_ctrl_c_gate
+from app.cli.support.prompt_support import (
+    repl_prompt_note_ctrl_c,
+    repl_reset_ctrl_c_gate,
+    set_sigint_delegate,
+)
 from app.llm_reasoning_effort import apply_reasoning_effort
 
 log = logging.getLogger(__name__)
@@ -507,6 +511,7 @@ def run_repl(initial_input: str | None = None, config: ReplConfig | None = None)
 # ``confirm_event.wait`` poll timeout. 250 ms is still well below the
 # threshold where humans notice Esc-cancel latency.
 _PROMPT_REFRESH_INTERVAL_S = 0.25
+_INTERRUPT_DRAIN_TIMEOUT_S = 0.15
 
 
 @dataclass
@@ -815,6 +820,20 @@ async def _run_interactive(
     # invoked from a worker thread (see :func:`_request_exit`).
     state.loop = main_loop
 
+    def _sigint_delegate() -> bool:
+        """Handle Ctrl+C while the REPL has in-flight work."""
+        if (
+            state.is_dispatch_running()
+            or state.current_cancel_event is not None
+            or state.is_awaiting_confirmation()
+            or not state.queue.empty()
+        ):
+            state.cancel_current_dispatch()
+            return True
+        return False
+
+    set_sigint_delegate(_sigint_delegate)
+
     def _request_exit() -> None:
         state.exit_requested = True
         state.cancel_current_dispatch()
@@ -1042,12 +1061,16 @@ async def _run_interactive(
             except asyncio.CancelledError:
                 _write_spinner(commit=True)
                 state.cancel_current_dispatch()
-                # Give the worker a moment to print "· interrupted".
+                # Give the worker a brief moment to flush "· interrupted",
+                # but return control quickly so Ctrl+C feels immediate.
                 # SIM105 suppressed: bare ``await`` inside ``contextlib.suppress``
                 # is flagged by CodeQL as "statement has no effect".
                 try:  # noqa: SIM105
-                    await asyncio.wait_for(asyncio.shield(turn_done), timeout=2.0)
-                except Exception:
+                    await asyncio.wait_for(
+                        asyncio.shield(turn_done),
+                        timeout=_INTERRUPT_DRAIN_TIMEOUT_S,
+                    )
+                except (TimeoutError, asyncio.CancelledError):
                     # ``CancelledError`` vs worker teardown ordering is non-deterministic.
                     pass
                 raise
@@ -1055,9 +1078,12 @@ async def _run_interactive(
                 _write_spinner(commit=True)
                 state.cancel_current_dispatch()
                 try:  # noqa: SIM105
-                    await asyncio.wait_for(asyncio.shield(turn_done), timeout=2.0)
-                except Exception:
-                    # Same best-effort join as ``CancelledError``; Ctrl+C path returns.
+                    await asyncio.wait_for(
+                        asyncio.shield(turn_done),
+                        timeout=_INTERRUPT_DRAIN_TIMEOUT_S,
+                    )
+                except (TimeoutError, asyncio.CancelledError):
+                    # Same best-effort drain as ``CancelledError``; Ctrl+C path returns.
                     pass
                 return
 
@@ -1135,6 +1161,7 @@ async def _run_interactive(
                 # Ctrl+C cancels; confirmations are served inline.
                 await _wait_for_dispatch(turn_done)
     finally:
+        set_sigint_delegate(None)
         state.exit_requested = True
         state.cancel_current_dispatch()
         sampler_task.cancel()

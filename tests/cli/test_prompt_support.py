@@ -9,9 +9,12 @@ from prompt_toolkit.output import DummyOutput  # type: ignore[import-not-found]
 
 from app.cli.support.prompt_support import (
     _last_ctrl_c,
+    _sigint_delegate,
     handle_ctrl_c_press,
+    handle_sigint_for_cli,
     install_questionary_ctrl_c_double_exit,
     install_questionary_escape_cancel,
+    set_sigint_delegate,
 )
 
 
@@ -139,6 +142,48 @@ def test_ctrl_c_hint_resets_after_window(capsys) -> None:
     handle_ctrl_c_press()
     out = capsys.readouterr().out
     assert "(Press Ctrl+C again to exit)" in out
+
+
+def test_handle_sigint_for_cli_uses_delegate_when_handled(capsys) -> None:
+    _last_ctrl_c[0] = None
+    set_sigint_delegate(lambda: True)
+    try:
+        handle_sigint_for_cli()
+    finally:
+        set_sigint_delegate(None)
+    assert capsys.readouterr().out == ""
+    assert _last_ctrl_c[0] is None
+
+
+def test_handle_sigint_for_cli_falls_back_when_delegate_not_handled(capsys) -> None:
+    _last_ctrl_c[0] = None
+    set_sigint_delegate(lambda: False)
+    try:
+        handle_sigint_for_cli()
+    finally:
+        set_sigint_delegate(None)
+    out = capsys.readouterr().out
+    assert "(Press Ctrl+C again to exit)" in out
+
+
+def test_handle_sigint_for_cli_falls_back_when_delegate_errors(capsys) -> None:
+    _last_ctrl_c[0] = None
+
+    def _boom() -> bool:
+        raise RuntimeError("boom")
+
+    set_sigint_delegate(_boom)
+    try:
+        handle_sigint_for_cli()
+    finally:
+        set_sigint_delegate(None)
+    out = capsys.readouterr().out
+    assert "(Press Ctrl+C again to exit)" in out
+
+
+def test_sigint_delegate_starts_cleared() -> None:
+    set_sigint_delegate(None)
+    assert _sigint_delegate[0] is None
 
 
 def test_questionary_ask_inside_running_event_loop_does_not_raise() -> None:

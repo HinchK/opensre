@@ -23,7 +23,7 @@ from app.cli.commands import register_commands
 from app.cli.support.exception_reporting import report_exception, should_report_exception
 from app.cli.support.layout import RichGroup, render_landing
 from app.cli.support.prompt_support import (
-    handle_ctrl_c_press,
+    handle_sigint_for_cli,
     install_questionary_ctrl_c_double_exit,
     install_questionary_escape_cancel,
 )
@@ -198,7 +198,7 @@ def _install_sigint_handler() -> None:
     """
 
     def _handler(_signum: int, _frame: object) -> None:
-        handle_ctrl_c_press()
+        handle_sigint_for_cli()
 
     signal.signal(signal.SIGINT, _handler)
 

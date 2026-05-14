@@ -13,16 +13,16 @@ from prompt_toolkit.key_binding import KeyBindings, KeyBindingsBase, merge_key_b
 from prompt_toolkit.keys import Keys
 from rich.console import Console
 
-from app.cli.interactive_shell.ui.theme import DIM
-
 _escape_patch_installed: list[bool] = [False]
 _ctrl_c_patch_installed: list[bool] = [False]
 
 # Shared timestamp of the last Ctrl+C press (None = never pressed).
 _last_ctrl_c: list[float | None] = [None]
+_sigint_delegate: list[Callable[[], bool] | None] = [None]
 
 CTRL_C_DOUBLE_PRESS_WINDOW_S: float = 2.0
 _CTRL_C_EXIT_WINDOW: float = CTRL_C_DOUBLE_PRESS_WINDOW_S
+_DIM_STYLE = "#444444"
 
 
 class _HardQuitInterrupt(KeyboardInterrupt):
@@ -97,6 +97,34 @@ def handle_ctrl_c_press() -> None:
         sys.exit(0)
     _last_ctrl_c[0] = now
     print("\n(Press Ctrl+C again to exit)", flush=True)
+
+
+def set_sigint_delegate(delegate: Callable[[], bool] | None) -> None:
+    """Register an optional SIGINT delegate for context-specific handling.
+
+    The delegate should return True when it fully handled Ctrl+C (for example,
+    cancelling an in-flight REPL dispatch) so global double-press exit logic is
+    skipped for that signal.
+    """
+
+    _sigint_delegate[0] = delegate
+
+
+def handle_sigint_for_cli() -> None:
+    """Handle SIGINT with optional context-aware delegate fallback."""
+
+    delegate = _sigint_delegate[0]
+    if delegate is not None:
+        try:
+            if delegate():
+                # Delegate-handled interrupts should not arm the global
+                # "press again to exit" window.
+                _last_ctrl_c[0] = None
+                return
+        except Exception:
+            # Never let delegate failures break SIGINT handling.
+            pass
+    handle_ctrl_c_press()
 
 
 def _with_ctrl_c_double_exit(
@@ -184,11 +212,11 @@ def repl_reset_ctrl_c_gate() -> None:
 def repl_prompt_note_ctrl_c(console: Console) -> bool:
     now = time.monotonic()
     if _last_ctrl_c[0] is not None and now - _last_ctrl_c[0] <= _CTRL_C_EXIT_WINDOW:
-        console.print(f"[{DIM}]Goodbye![/]")
+        console.print(f"[{_DIM_STYLE}]Goodbye![/]")
         _last_ctrl_c[0] = None
         return True
     _last_ctrl_c[0] = now
-    console.print(f"[{DIM}](Press Ctrl+C again to exit)[/]")
+    console.print(f"[{_DIM_STYLE}](Press Ctrl+C again to exit)[/]")
     return False
 
 
