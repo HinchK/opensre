@@ -28,6 +28,7 @@ from __future__ import annotations
 import re
 import time
 from collections.abc import Iterator
+from contextlib import suppress
 
 from rich.console import Console
 from rich.markdown import Markdown
@@ -166,13 +167,11 @@ def stream_to_console(
                     drained.append(rest)
                 update_progress = getattr(console, "update_streaming_progress", None)
                 if callable(update_progress):
-                    try:
+                    with suppress(Exception):
                         update_progress(
                             sum(len(chunk_part) for chunk_part in peeked)
                             + sum(len(chunk_part) for chunk_part in drained)
                         )
-                    except Exception:
-                        pass
                 _maybe_wipe_stdout_wait(console)
                 return "".join(peeked) + "".join(drained)
             break
