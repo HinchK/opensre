@@ -1001,6 +1001,25 @@ class TestSuppressionPeek:
         assert "●" not in output
         assert '{"actions"' not in output
 
+    def test_suppressed_tty_path_invokes_wipe_hook(self) -> None:
+        buf = io.StringIO()
+        wipe_calls: list[int] = []
+
+        class _WipeConsole(Console):
+            def wipe_stdout_wait_spinner_line(self) -> None:
+                wipe_calls.append(1)
+
+        console = _WipeConsole(
+            file=buf, force_terminal=True, color_system=None, width=80, highlight=False
+        )
+        stream_to_console(
+            console,
+            label="assistant",
+            chunks=_yield_chunks(['{"actions": []}']),
+            suppress_if_starts_with="{",
+        )
+        assert len(wipe_calls) == 1
+
     def test_renders_normally_when_first_char_does_not_match(self) -> None:
         console, buf = _tty_console()
         result = stream_to_console(

@@ -99,6 +99,18 @@ def _format_footer_elapsed_s(elapsed: float) -> str:
     return f"{elapsed:.2f}"
 
 
+def _maybe_wipe_stdout_wait(console: Console) -> None:
+    """Erase the REPL wait line if ``console`` exposes ``wipe_stdout_wait_spinner_line``.
+
+    The JSON action-plan path returns before any ``console.print``; we still wipe so a
+    transient stdout spinner from the interactive dispatch does not linger in scrollback.
+    """
+
+    wipe = getattr(console, "wipe_stdout_wait_spinner_line", None)
+    if callable(wipe):
+        wipe()
+
+
 def stream_to_console(
     console: Console,
     *,
@@ -152,12 +164,11 @@ def stream_to_console(
                     if rest is None:
                         break
                     drained.append(rest)
+                _maybe_wipe_stdout_wait(console)
                 return "".join(peeked) + "".join(drained)
             break
 
-    wipe = getattr(console, "wipe_stdout_wait_spinner_line", None)
-    if callable(wipe):
-        wipe()
+    _maybe_wipe_stdout_wait(console)
     console.print()
     render_response_header(console, label)
 
