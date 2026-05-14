@@ -938,26 +938,6 @@ async def _run_interactive(
                 turn_done.set_result(None)
             state.queue.task_done()
 
-    def _busy_turn_first_message_line() -> str:
-        animate = spinner.inline_spinner_ansi()
-        if animate:
-            return animate
-        return f"{ANSI_DIM}… — Ctrl+C to cancel{ANSI_RESET}"
-
-    def _busy_rule_ansi() -> str:
-        """Dim (non-accent) horizontal rule used while a turn is running.
-
-        Using the accent colour (bold green) for the rule during a busy
-        turn made it look identical to a fresh ready-prompt, misleading
-        the user into thinking input was open. Dim gray signals "sealed".
-        """
-        try:
-            width = get_app_or_none().output.get_size().columns  # type: ignore[union-attr]
-        except Exception:
-            width = 80
-        rule = _prompt_surface._PROMPT_RULE_CHAR * max(width, 1)
-        return f"{ANSI_DIM}{rule}{ANSI_RESET}"
-
     def _message_with_spinner() -> ANSI:
         """Prompt message — spinner row above the top rule + ``❯`` prefix.
 
@@ -984,7 +964,9 @@ async def _run_interactive(
         omits elapsed/token counts (``wait_metrics=False``); the reply footer
         holds final timing and totals.
 
-        * ``Ctrl+C`` / ``CancelledError`` → cancels the dispatch and returns.
+        * ``Ctrl+C`` → cancels the dispatch and returns.
+        * ``asyncio.CancelledError`` → cleanup then **re-raises** so outer
+          cancellation is not swallowed (Python 3.11+ semantics).
         * Confirmation requests (``Proceed? [y/N]``) → briefly re-enters
           ``prompt_async`` with a minimal y/N frame, then resumes waiting.
         """
@@ -1033,7 +1015,12 @@ async def _run_interactive(
                     break
                 if _looks_like_confirmation_answer(answer):
                     state.deliver_confirmation(answer or "")
-                # Non-y/n: loop — redisplay the confirmation prompt
+                    # Let the worker thread clear ``confirm_event`` (see
+                    # ``_route_confirm_through_prompt``) before we re-check
+                    # ``is_awaiting_confirmation()`` — avoids a duplicate y/N
+                    # frame on the next loop iteration.
+                    await asyncio.sleep(0)
+                # Invalid answer: redisplay confirmation prompt.
                 continue
 
             _write_spinner()
@@ -1047,7 +1034,7 @@ async def _run_interactive(
                 return
             except TimeoutError:
                 pass  # tick — animate spinner, check confirmation state
-            except (asyncio.CancelledError, KeyboardInterrupt):
+            except asyncio.CancelledError:
                 _write_spinner(commit=True)
                 state.cancel_current_dispatch()
                 # Give the worker a moment to print "· interrupted".
@@ -1056,6 +1043,16 @@ async def _run_interactive(
                 try:  # noqa: SIM105
                     await asyncio.wait_for(asyncio.shield(turn_done), timeout=2.0)
                 except Exception:
+                    # ``CancelledError`` vs worker teardown ordering is non-deterministic.
+                    pass
+                raise
+            except KeyboardInterrupt:
+                _write_spinner(commit=True)
+                state.cancel_current_dispatch()
+                try:  # noqa: SIM105
+                    await asyncio.wait_for(asyncio.shield(turn_done), timeout=2.0)
+                except Exception:
+                    # Same best-effort join as ``CancelledError``; Ctrl+C path returns.
                     pass
                 return
 
