@@ -105,6 +105,11 @@ async def astream_investigation(
     try:
         async for event in compiled_graph.astream_events(initial, version="v2"):
             yield _map_langgraph_event(dict(event))
+    except RuntimeError as exc:
+        if "cannot schedule new futures after shutdown" in str(exc):
+            return  # LangGraph thread pool shut down during teardown; not a real error
+        capture_exception(exc)
+        raise
     except Exception as exc:
         capture_exception(exc)
         raise
