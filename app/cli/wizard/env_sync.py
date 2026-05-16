@@ -37,11 +37,17 @@ def sync_env_values(
 ) -> Path:
     """Write multiple environment values into the target .env file."""
     target_path = env_path or PROJECT_ENV_PATH
-    existing = (
-        target_path.read_text(encoding="utf-8").splitlines(keepends=True)
-        if target_path.exists()
-        else []
-    )
+    try:
+        existing = (
+            target_path.read_text(encoding="utf-8").splitlines(keepends=True)
+            if target_path.exists()
+            else []
+        )
+    except PermissionError as err:
+        raise RuntimeError(
+            f"Permission denied reading '{target_path}'. "
+            f"Check file ownership and permissions: ls -la {target_path.parent}"
+        ) from err
 
     lines = existing
     for key, value in values.items():
@@ -103,11 +109,17 @@ def sync_provider_env(
     from app.cli.wizard.config import SUPPORTED_PROVIDERS
 
     target_path = env_path or PROJECT_ENV_PATH
-    existing = (
-        target_path.read_text(encoding="utf-8").splitlines(keepends=True)
-        if target_path.exists()
-        else []
-    )
+    try:
+        existing = (
+            target_path.read_text(encoding="utf-8").splitlines(keepends=True)
+            if target_path.exists()
+            else []
+        )
+    except PermissionError as err:
+        raise RuntimeError(
+            f"Permission denied reading '{target_path}'. "
+            f"Check file ownership and permissions: ls -la {target_path.parent}"
+        ) from err
 
     # Strip every provider's API key and every provider's model keys except the
     # active provider's model slots (secrets are stored in the system keyring).
