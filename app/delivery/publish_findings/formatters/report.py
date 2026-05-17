@@ -218,11 +218,15 @@ def format_slack_message(ctx: ReportContext) -> str:
         conclusion_block += "\n## Upstream Correlation\n"
         if sections.correlation_signals:
             conclusion_block += (
-                "*Correlated signals:*\n" + "\n".join(sections.correlation_signals) + "\n"
+                "*Correlated signals:*\n"
+                + "\n".join(_sanitize_for_slack(s) for s in sections.correlation_signals)
+                + "\n"
             )
         if sections.correlation_drivers:
             conclusion_block += (
-                "*Most likely causal drivers:*\n" + "\n".join(sections.correlation_drivers) + "\n"
+                "*Most likely causal drivers:*\n"
+                + "\n".join(_sanitize_for_slack(d) for d in sections.correlation_drivers)
+                + "\n"
             )
 
     provenance_block = ""
