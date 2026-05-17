@@ -14,7 +14,6 @@ from __future__ import annotations
 from typing import Any
 
 from app.delivery.publish_findings.formatters.sections import (
-    _sanitize_for_slack,
     build_report_sections,
 )
 from app.delivery.publish_findings.report_context import ReportContext
@@ -84,7 +83,7 @@ def format_discord_message(ctx: ReportContext) -> tuple[str, list[dict[str, Any]
         embed["fields"].append(
             {
                 "name": "Top Error Log",
-                "value": f"```\n{_truncate(sections.top_log, _DISCORD_FIELD_VALUE_LIMIT)}\n```",
+                "value": f"```\n{_truncate(sections.top_log, _DISCORD_FIELD_VALUE_LIMIT - 8)}\n```",
                 "inline": False,
             }
         )
@@ -92,7 +91,11 @@ def format_discord_message(ctx: ReportContext) -> tuple[str, list[dict[str, Any]
     if sections.findings:
         lines = []
         for c in sections.findings:
-            ev = f" [{', '.join(c.evidence_refs)}]" if c.evidence_refs else ""
+            ev = (
+                f" [{', '.join(e.display_id for e in c.evidence_refs)}]"
+                if c.evidence_refs
+                else ""
+            )
             lines.append(f"• {c.text}{ev}")
         embed["fields"].append(
             {
@@ -129,8 +132,7 @@ def format_discord_message(ctx: ReportContext) -> tuple[str, list[dict[str, Any]
         )
 
     if sections.provenance:
-        sanitized = [_sanitize_for_slack(pl.lstrip("• ").strip()) for pl in sections.provenance]
-        lines = [f"• {s}" for s in sanitized]
+        lines = [f"• {pl.lstrip('• ').strip()}" for pl in sections.provenance]
         embed["fields"].append(
             {
                 "name": "Provenance",
@@ -140,7 +142,7 @@ def format_discord_message(ctx: ReportContext) -> tuple[str, list[dict[str, Any]
         )
 
     if sections.remediation:
-        lines = [f"• {_sanitize_for_slack(s)}" for s in sections.remediation]
+        lines = [f"• {s}" for s in sections.remediation]
         embed["fields"].append(
             {
                 "name": "Recommended Actions",

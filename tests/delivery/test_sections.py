@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from app.delivery.publish_findings.formatters.sections import (
     ClaimLine,
+    EvidenceRef,
     build_report_sections,
 )
 from app.delivery.publish_findings.report_context import build_report_context
@@ -69,6 +70,21 @@ def test_findings_include_evidence_refs() -> None:
     claim = sections.findings[0]
     assert "500 responses" in claim.text
     assert claim.evidence_refs  # E1 from catalog
+    assert isinstance(claim.evidence_refs[0], EvidenceRef)
+    assert claim.evidence_refs[0].display_id == "E1"
+
+
+def test_findings_preserve_evidence_urls() -> None:
+    state = _make_state()
+    state["evidence"]["datadog_logs"] = [{"message": "5xx spike"}]
+    state["available_sources"]["datadog"] = {"site": "datadoghq.com"}
+    ctx = build_report_context(state)
+    sections = build_report_sections(ctx)
+
+    for claim in sections.findings:
+        for ref in claim.evidence_refs:
+            if ref.url:
+                assert ref.url.startswith("http")
 
 
 def test_non_validated_claims_are_sanitized() -> None:

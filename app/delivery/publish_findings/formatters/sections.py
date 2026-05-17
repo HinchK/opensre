@@ -25,11 +25,19 @@ from app.delivery.publish_findings.urls.aws import build_cloudwatch_url
 
 
 @dataclass
+class EvidenceRef:
+    """A single evidence reference with optional URL."""
+
+    display_id: str
+    url: str | None = None
+
+
+@dataclass
 class ClaimLine:
     """A single claim bullet with optional evidence references."""
 
     text: str
-    evidence_refs: list[str] = field(default_factory=list)
+    evidence_refs: list[EvidenceRef] = field(default_factory=list)
 
 
 @dataclass
@@ -252,14 +260,15 @@ def _render_claim_lines(ctx: ReportContext) -> tuple[list[ClaimLine], list[str]]
         claim = _sanitize_for_slack(claim)
         evidence_ids = claim_data.get("evidence_ids", [])
         evidence_labels = claim_data.get("evidence_labels", [])
-        evidence_refs: list[str] = []
+        evidence_refs: list[EvidenceRef] = []
         if evidence_ids:
             for eid in evidence_ids:
                 entry = catalog.get(eid, {})
                 disp = entry.get("display_id", eid)
-                evidence_refs.append(disp)
+                url = entry.get("url")
+                evidence_refs.append(EvidenceRef(display_id=disp, url=url or None))
         elif evidence_labels:
-            evidence_refs = [str(x) for x in evidence_labels]
+            evidence_refs = [EvidenceRef(display_id=str(x)) for x in evidence_labels]
         validated_lines.append(ClaimLine(text=claim, evidence_refs=evidence_refs))
 
     non_validated_lines: list[str] = [

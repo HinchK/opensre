@@ -124,6 +124,19 @@ def test_discord_field_value_respects_1024_limit() -> None:
         assert len(field["value"]) <= 1024
 
 
+def test_discord_top_log_code_fence_respects_limit() -> None:
+    state = _make_state()
+    state["evidence"]["datadog_error_logs"] = [{"message": "X" * 2000}]
+    ctx = build_report_context(state)
+    _, embeds = format_discord_message(ctx)
+
+    for field in embeds[0]["fields"]:
+        if field["name"] == "Top Error Log":
+            assert len(field["value"]) <= 1024
+            assert field["value"].startswith("```\n")
+            assert field["value"].endswith("\n```")
+
+
 def test_discord_field_name_respects_256_limit() -> None:
     state = _make_state()
     ctx = build_report_context(state)

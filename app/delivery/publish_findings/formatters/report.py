@@ -13,7 +13,6 @@ from app.delivery.publish_findings.formatters.infrastructure import (
     get_failed_pods,
 )
 from app.delivery.publish_findings.formatters.sections import (
-    _derive_root_cause_sentence,
     _sanitize_for_slack,
     build_report_sections,
 )
@@ -201,10 +200,13 @@ def format_slack_message(ctx: ReportContext) -> str:
         conclusion_block += f"`{sections.top_log}`\n"
 
     if sections.findings:
-        lines = [
-            f"• {c.text} [{', '.join(c.evidence_refs)}]" if c.evidence_refs else f"• {c.text}"
-            for c in sections.findings
-        ]
+        lines = []
+        for c in sections.findings:
+            if c.evidence_refs:
+                refs = ", ".join(format_slack_link(e.display_id, e.url) for e in c.evidence_refs)
+                lines.append(f"• {c.text} [{refs}]")
+            else:
+                lines.append(f"• {c.text}")
         conclusion_block += "\n## Findings\n" + "\n".join(lines) + "\n"
     if sections.non_validated:
         conclusion_block += (
@@ -265,7 +267,7 @@ def format_telegram_message(ctx: ReportContext) -> str:
     sections = build_report_sections(ctx)
     duration_seconds = ctx.get("investigation_duration_seconds")
     alert_id = ctx.get("alert_id")
-    derived_rc = _derive_root_cause_sentence(ctx)
+    derived_rc = sections.root_cause
     root_cause_sentence = derived_rc or "Not determined (insufficient evidence)."
 
     parts: list[str] = [_severity_telegram_header(ctx)]
@@ -288,7 +290,11 @@ def format_telegram_message(ctx: ReportContext) -> str:
     if sections.findings:
         lines = []
         for c in sections.findings:
-            ev_str = f" [{', '.join(c.evidence_refs)}]" if c.evidence_refs else ""
+            if c.evidence_refs:
+                refs = ", ".join(format_html_link(e.display_id, e.url) for e in c.evidence_refs)
+                ev_str = f" [{refs}]"
+            else:
+                ev_str = ""
             lines.append(f"• {_to_telegram_html_body(c.text)}{ev_str}")
         parts.append("<b>Findings</b>\n" + "\n".join(lines))
     if sections.non_validated:
@@ -380,10 +386,13 @@ def build_slack_blocks(ctx: ReportContext) -> list[dict]:
 
     # ── Validated Claims (Findings) and Non-Validated Claims ──
     if sections.findings:
-        lines = [
-            f"• {c.text} [{', '.join(c.evidence_refs)}]" if c.evidence_refs else f"• {c.text}"
-            for c in sections.findings
-        ]
+        lines = []
+        for c in sections.findings:
+            if c.evidence_refs:
+                refs = ", ".join(format_slack_link(e.display_id, e.url) for e in c.evidence_refs)
+                lines.append(f"• {c.text} [{refs}]")
+            else:
+                lines.append(f"• {c.text}")
         blocks.append({"type": "divider"})
         blocks.append(
             {
