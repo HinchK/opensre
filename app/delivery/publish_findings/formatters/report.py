@@ -1,24 +1,27 @@
-"""RCA report formatting for Slack (mrkdwn / Block Kit) and Telegram (HTML)."""
+"""RCA report formatting for Slack (mrkdwn / Block Kit) and Telegram (HTML).
+
+All formatters consume shared section builders from sections.py so that
+claim rendering, provenance formatting, correlation, etc. are defined once.
+"""
 
 import html
 import re
 
 from app.delivery.publish_findings.formatters.base import format_html_link, format_slack_link
-from app.delivery.publish_findings.formatters.evidence import (
-    format_cited_evidence_section,
-    format_cited_evidence_section_html,
-)
 from app.delivery.publish_findings.formatters.infrastructure import (
-    build_investigation_trace,
     format_pod_line,
     get_failed_pods,
 )
+from app.delivery.publish_findings.formatters.sections import (
+    _derive_root_cause_sentence,
+    _sanitize_for_slack,
+    build_report_sections,
+)
 from app.delivery.publish_findings.report_context import ReportContext
-from app.delivery.publish_findings.urls.aws import build_cloudwatch_url
 
 
 def render_cloudwatch_link(ctx: ReportContext) -> str:
-    """Render CloudWatch logs link if available in context."""
+    """Render CloudWatch logs link for Slack mrkdwn."""
     cw_url = ctx.get("cloudwatch_logs_url")
     cw_group = ctx.get("cloudwatch_log_group")
     cw_stream = ctx.get("cloudwatch_log_stream")
@@ -26,6 +29,8 @@ def render_cloudwatch_link(ctx: ReportContext) -> str:
     if cw_url:
         return f"\n*{format_slack_link('CloudWatch Logs', cw_url)}*\n"
     elif cw_group and cw_stream:
+        from app.delivery.publish_findings.urls.aws import build_cloudwatch_url
+
         url = build_cloudwatch_url(ctx)
         view_link = format_slack_link("CloudWatch Logs", url) if url else None
         if view_link:
@@ -35,102 +40,30 @@ def render_cloudwatch_link(ctx: ReportContext) -> str:
     return ""
 
 
-def _format_provenance_lines(ctx: ReportContext) -> list[str]:
-    provenance = ctx.get("source_provenance") or {}
-    lines: list[str] = []
-    for source_name, entry in provenance.items():
-        label = entry.get("label") or source_name.title()
-        summary = entry.get("summary") or ""
-        if summary:
-            lines.append(f"• {label}: {summary}")
-    return lines
+def render_cloudwatch_link_html(ctx: ReportContext) -> str:
+    """Telegram-HTML CloudWatch deep link."""
+    import html as html_mod
 
+    from app.delivery.publish_findings.urls.aws import build_cloudwatch_url
 
-def _format_correlation_lines(ctx: ReportContext) -> tuple[list[str], list[str]]:
-    correlation = ctx.get("correlation") or {}
-    if not isinstance(correlation, dict):
-        return [], []
+    cw_url = ctx.get("cloudwatch_logs_url")
+    cw_group = ctx.get("cloudwatch_log_group")
+    cw_stream = ctx.get("cloudwatch_log_stream")
 
-    raw_signals = correlation.get("correlated_signals") or []
-    raw_drivers = correlation.get("most_likely_causal_drivers") or []
-
-    signal_lines: list[str] = []
-    for signal in raw_signals:
-        if not isinstance(signal, dict):
-            continue
-        name = signal.get("name") or "unknown"
-        source = signal.get("source") or "unknown"
-        score = signal.get("score")
-        score_text = f" score={float(score):.2f}" if isinstance(score, int | float) else ""
-        signal_lines.append(f"• {name} ({source}{score_text})")
-
-    driver_lines: list[str] = []
-    for driver in raw_drivers:
-        if not isinstance(driver, dict):
-            continue
-        name = driver.get("name") or "unknown"
-        confidence = driver.get("confidence")
-        rationale = driver.get("rationale") or ""
-        confidence_text = (
-            f" confidence={float(confidence):.2f}" if isinstance(confidence, int | float) else ""
+    if cw_url:
+        safe = html_mod.escape(str(cw_url), quote=True)
+        return f'\n<b>CloudWatch</b>: <a href="{safe}">View logs</a>\n'
+    if cw_group and cw_stream:
+        url = build_cloudwatch_url(ctx)
+        if url:
+            safe = html_mod.escape(str(url), quote=True)
+            return f'\n<b>CloudWatch</b>: <a href="{safe}">View logs</a>\n'
+        return (
+            f"\n<b>CloudWatch Logs</b>\n"
+            f"Log Group: {html_mod.escape(str(cw_group))}\n"
+            f"Log Stream: {html_mod.escape(str(cw_stream))}\n"
         )
-        suffix = f" — {_sanitize_for_slack(str(rationale))}" if rationale else ""
-        driver_lines.append(f"• {name}{confidence_text}{suffix}")
-
-    return signal_lines, driver_lines
-
-
-# ---------------------------------------------------------------------------
-# Shared section helpers — called by both text and block renderers
-# ---------------------------------------------------------------------------
-
-
-def _render_claim_lines(ctx: ReportContext) -> tuple[list[str], list[str]]:
-    """Return (validated_lines, non_validated_lines) as plain mrkdwn bullet strings.
-
-    Each validated line includes evidence citations like [E1, E2]. Both renderers
-    (format_slack_message and build_slack_blocks) call this to avoid duplicating
-    the catalog-lookup and link-formatting logic.
-    """
-    catalog = ctx.get("evidence_catalog") or {}
-    evidence = ctx.get("evidence") or {}
-
-    validated_lines: list[str] = []
-    for claim_data in ctx.get("validated_claims", []):
-        claim = claim_data.get("claim", "")
-        claim = _resolve_evidence_tags(claim, evidence)
-        claim = _sanitize_for_slack(claim)
-        evidence_ids = claim_data.get("evidence_ids", [])
-        evidence_labels = claim_data.get("evidence_labels", [])
-        evidence_list: list[str] = []
-        if evidence_ids:
-            for eid in evidence_ids:
-                entry = catalog.get(eid, {})
-                disp = entry.get("display_id", eid)
-                url = entry.get("url")
-                evidence_list.append(format_slack_link(disp, url) if url else disp)
-        elif evidence_labels:
-            evidence_list = list(evidence_labels)
-        ev_str = f" [{', '.join(evidence_list)}]" if evidence_list else ""
-        validated_lines.append(f"\u2022 {claim}{ev_str}")
-
-    non_validated_lines: list[str] = [
-        f"\u2022 {_sanitize_for_slack(cd.get('claim', ''))}"
-        for cd in ctx.get("non_validated_claims", [])
-    ]
-
-    return validated_lines, non_validated_lines
-
-
-def _sanitize_for_slack(text: str) -> str:
-    """Convert markdown formatting to Slack mrkdwn.
-
-    Slack does not render # headers, ** bold, or other standard markdown.
-    This converts common patterns to Slack-native formatting.
-    """
-    result = re.sub(r"^#{1,6}\s+(.+)$", r"*\1*", text, flags=re.MULTILINE)
-    result = re.sub(r"\*\*(.+?)\*\*", r"*\1*", result)
-    return result
+    return ""
 
 
 _SLACK_LINK_RE = re.compile(r"<(https?://[^|>]+)(?:\|([^>]+))?>")
@@ -231,59 +164,6 @@ def _severity_telegram_header(ctx: ReportContext) -> str:
     return f"{emoji} <b>{alert}</b> · {pipeline}\n<i>severity: {html.escape(display_sev)}</i>"
 
 
-def _render_claim_lines_telegram(ctx: ReportContext) -> tuple[list[str], list[str]]:
-    catalog = ctx.get("evidence_catalog") or {}
-    evidence = ctx.get("evidence") or {}
-
-    validated_lines: list[str] = []
-    for claim_data in ctx.get("validated_claims", []):
-        claim = claim_data.get("claim", "")
-        claim = _resolve_evidence_tags(claim, evidence)
-        claim = _sanitize_for_slack(claim)
-        evidence_ids = claim_data.get("evidence_ids", [])
-        evidence_labels = claim_data.get("evidence_labels", [])
-        evidence_list: list[str] = []
-        if evidence_ids:
-            for eid in evidence_ids:
-                entry = catalog.get(eid, {})
-                disp = entry.get("display_id", eid)
-                url = entry.get("url")
-                evidence_list.append(format_html_link(str(disp), url or None))
-        elif evidence_labels:
-            evidence_list = [html.escape(str(x)) for x in evidence_labels]
-        ev_str = f" [{', '.join(evidence_list)}]" if evidence_list else ""
-        validated_lines.append(f"• {_to_telegram_html_body(claim)}{ev_str}")
-
-    non_validated_lines: list[str] = []
-    for cd in ctx.get("non_validated_claims", []):
-        raw = _sanitize_for_slack(cd.get("claim", ""))
-        non_validated_lines.append(f"• {_to_telegram_html_body(raw)}")
-
-    return validated_lines, non_validated_lines
-
-
-def render_cloudwatch_link_html(ctx: ReportContext) -> str:
-    """Telegram-HTML CloudWatch deep link, mirroring :func:`render_cloudwatch_link`."""
-    cw_url = ctx.get("cloudwatch_logs_url")
-    cw_group = ctx.get("cloudwatch_log_group")
-    cw_stream = ctx.get("cloudwatch_log_stream")
-
-    if cw_url:
-        safe = html.escape(str(cw_url), quote=True)
-        return f'\n<b>CloudWatch</b>: <a href="{safe}">View logs</a>\n'
-    if cw_group and cw_stream:
-        url = build_cloudwatch_url(ctx)
-        if url:
-            safe = html.escape(str(url), quote=True)
-            return f'\n<b>CloudWatch</b>: <a href="{safe}">View logs</a>\n'
-        return (
-            f"\n<b>CloudWatch Logs</b>\n"
-            f"Log Group: {html.escape(str(cw_group))}\n"
-            f"Log Stream: {html.escape(str(cw_stream))}\n"
-        )
-    return ""
-
-
 def _mrkdwn_section(text: str) -> "dict | None":
     """Build a Slack Block Kit section block with sanitized mrkdwn text.
 
@@ -302,148 +182,7 @@ def _mrkdwn_section(text: str) -> "dict | None":
 
 
 # ---------------------------------------------------------------------------
-# Evidence tag resolution helpers
-# ---------------------------------------------------------------------------
-
-# Maps LLM source name → ordered list of evidence dict keys to try for a log message
-_EVIDENCE_LOG_KEYS: dict[str, list[str]] = {
-    "datadog_logs": ["datadog_error_logs", "datadog_logs"],
-    "datadog": ["datadog_error_logs", "datadog_logs"],
-    "grafana_logs": ["grafana_error_logs", "grafana_logs"],
-    "grafana": ["grafana_error_logs", "grafana_logs"],
-    "cloudwatch_logs": ["cloudwatch_logs"],
-    "cloudwatch": ["cloudwatch_logs"],
-}
-
-
-def _extract_log_message(entry: object) -> str:
-    """Extract a plain string message from a log entry that may be a dict or a string."""
-    if isinstance(entry, dict):
-        return (entry.get("message") or "").strip()
-    return str(entry).strip()
-
-
-def _resolve_evidence_tags(text: str, evidence: dict) -> str:
-    """Replace [evidence: source] tags with the actual log message in a code span.
-
-    Tries error logs first, then all logs for the named source. If no message
-    is found the tag is removed silently to avoid leaking raw LLM annotations.
-    """
-
-    def _replace(m: re.Match) -> str:
-        source = m.group(1).strip().lower()
-        for key in _EVIDENCE_LOG_KEYS.get(source, []):
-            logs = evidence.get(key) or []
-            if logs:
-                msg = _extract_log_message(logs[0])
-                if msg:
-                    return f": `{msg}`"
-        return ""
-
-    return re.sub(r"\s*\[(?i:evidence):\s*([^\]]+)\]", _replace, text).strip()
-
-
-def _get_top_error_log(evidence: dict) -> str | None:
-    """Return the first error log message from available evidence sources."""
-    for key in (
-        "datadog_error_logs",
-        "datadog_logs",
-        "grafana_error_logs",
-        "grafana_logs",
-        "cloudwatch_logs",
-    ):
-        logs = evidence.get(key) or []
-        if logs:
-            msg = _extract_log_message(logs[0])
-            if msg:
-                return msg
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Root cause derivation helpers
-# ---------------------------------------------------------------------------
-
-
-def _first_sentence(text: str) -> str:
-    """Return the first sentence from text, normalized to one line."""
-    cleaned = re.sub(r"(?:^|\s)#{1,6}\s+", " ", text, flags=re.MULTILINE)
-    cleaned = re.sub(
-        r"\b(?:Problem Statement|Summary|Context|Description|Overview)\b[:\s]*",
-        "",
-        cleaned,
-        flags=re.IGNORECASE,
-    )
-    normalized = " ".join(cleaned.split()).strip()
-    if not normalized:
-        return ""
-
-    parts = re.split(r"(?<=[.?!])\s+", normalized, maxsplit=1)
-    sentence = parts[0]
-    sentence = sentence.rstrip(".?!")
-    return sentence
-
-
-def _is_speculative(text: str) -> bool:
-    speculative_terms = (" may ", " might ", " possibly", " possible ", " likely ")
-    lower = f" {text.lower()} "
-    return any(term in lower for term in speculative_terms)
-
-
-def _remove_speculative_words(text: str) -> str:
-    speculative = ("may", "might", "likely", "probably", "possibly")
-    words = text.split()
-    filtered = [w for w in words if w.lower() not in speculative]
-    return " ".join(filtered)
-
-
-def _derive_root_cause_sentence(ctx: ReportContext) -> str:
-    """Derive a concise, single-sentence root cause with causal preference."""
-    root_cause_text = ctx.get("root_cause", "") or ""
-    root_cause_text = re.sub(r"\s*\[(?i:evidence):[^\]]*\]", "", root_cause_text).strip()
-    validated_claims = ctx.get("validated_claims", [])
-
-    if root_cause_text:
-        sentence = _first_sentence(root_cause_text)
-        if sentence and not _is_speculative(sentence):
-            return sentence
-
-    causal_connectors = (
-        " because ",
-        " due to ",
-        " caused ",
-        " resulted in ",
-        " led to ",
-        " root cause ",
-        " failure triggered ",
-    )
-
-    for claim_data in validated_claims:
-        claim = claim_data.get("claim", "") or ""
-        claim = re.sub(r"\s*\[(?i:evidence):[^\]]*\]", "", claim).strip()
-        lower = f" {claim.lower()} "
-        if any(connector in lower for connector in causal_connectors):
-            sentence = _first_sentence(claim)
-            if sentence:
-                return _first_sentence(_remove_speculative_words(sentence))
-
-    if root_cause_text:
-        sentence = _first_sentence(root_cause_text)
-        if sentence:
-            return sentence
-
-    if validated_claims:
-        claim = validated_claims[0].get("claim", "") or ""
-        claim = re.sub(r"\s*\[(?i:evidence):[^\]]*\]", "", claim).strip()
-        sentence = _first_sentence(claim)
-        if sentence:
-            return sentence
-
-    return ""
-
-
-# ---------------------------------------------------------------------------
-# Text renderer (Slack mrkdwn fallback + terminal + ingest report_md)
+# Telegram-specific formatting utilities
 # ---------------------------------------------------------------------------
 
 
@@ -453,62 +192,52 @@ def format_slack_message(ctx: ReportContext) -> str:
     Used as the `text` fallback (notifications, accessibility, terminal, ingest)
     when Block Kit blocks are the primary rendered content.
     """
+    sections = build_report_sections(ctx)
     alert_id = ctx.get("alert_id")
     duration_seconds = ctx.get("investigation_duration_seconds")
-    root_cause_sentence = _derive_root_cause_sentence(ctx)
 
-    if not root_cause_sentence:
-        root_cause_sentence = "Not determined (insufficient evidence)."
-    # Start the report directly with the root cause sentence, without a "Root Cause"
-    # heading line, so that section headings below can carry the visual emphasis.
-    conclusion_block = f"{root_cause_sentence}\n"
-    top_log = _get_top_error_log(ctx.get("evidence") or {})
-    if top_log:
-        conclusion_block += f"`{top_log}`\n"
+    conclusion_block = f"{sections.root_cause}\n"
+    if sections.top_log:
+        conclusion_block += f"`{sections.top_log}`\n"
 
-    validated_lines, non_validated_lines = _render_claim_lines(ctx)
-    if validated_lines:
-        # Use a larger markdown heading so that "Findings" stands out as a section.
-        conclusion_block += "\n## Findings\n" + "\n".join(validated_lines) + "\n"
-    if non_validated_lines:
+    if sections.findings:
+        lines = [f"• {c.text} [{', '.join(c.evidence_refs)}]" if c.evidence_refs else f"• {c.text}" for c in sections.findings]
+        conclusion_block += "\n## Findings\n" + "\n".join(lines) + "\n"
+    if sections.non_validated:
         conclusion_block += (
-            "\n*Non-Validated Claims (Inferred):*\n" + "\n".join(non_validated_lines) + "\n"
+            "\n*Non-Validated Claims (Inferred):*\n" + "\n".join(sections.non_validated) + "\n"
         )
 
-    correlation_signal_lines, correlation_driver_lines = _format_correlation_lines(ctx)
-    if correlation_signal_lines or correlation_driver_lines:
+    if sections.correlation_signals or sections.correlation_drivers:
         conclusion_block += "\n## Upstream Correlation\n"
-        if correlation_signal_lines:
+        if sections.correlation_signals:
             conclusion_block += (
-                "*Correlated signals:*\n" + "\n".join(correlation_signal_lines) + "\n"
+                "*Correlated signals:*\n" + "\n".join(sections.correlation_signals) + "\n"
             )
-        if correlation_driver_lines:
+        if sections.correlation_drivers:
             conclusion_block += (
-                "*Most likely causal drivers:*\n" + "\n".join(correlation_driver_lines) + "\n"
+                "*Most likely causal drivers:*\n" + "\n".join(sections.correlation_drivers) + "\n"
             )
 
-    provenance_lines = _format_provenance_lines(ctx)
     provenance_block = ""
-    if provenance_lines:
+    if sections.provenance:
         provenance_block = (
-            "\n*Provenance:*\n" + _sanitize_for_slack("\n".join(provenance_lines)) + "\n"
+            "\n*Provenance:*\n" + _sanitize_for_slack("\n".join(sections.provenance)) + "\n"
         )
 
-    remediation_steps = ctx.get("remediation_steps", [])
     remediation_block = ""
-    if remediation_steps:
+    if sections.remediation:
         remediation_block = (
             "\n## Recommended Actions\n"
-            + "\n".join(f"• {_sanitize_for_slack(s)}" for s in remediation_steps)
+            + "\n".join(f"• {_sanitize_for_slack(s)}" for s in sections.remediation)
             + "\n"
         )
 
-    trace_steps = build_investigation_trace(ctx)
     trace_block = (
-        "\n## Investigation Trace\n" + "\n".join(trace_steps) + "\n" if trace_steps else ""
+        "\n## Investigation Trace\n" + "\n".join(sections.trace) + "\n" if sections.trace else ""
     )
 
-    cited_section = _sanitize_for_slack(format_cited_evidence_section(ctx))
+    cited_section = _sanitize_for_slack(sections.evidence_citations_plain)
     cloudwatch_link = render_cloudwatch_link(ctx)
     meta_lines = []
     if duration_seconds is not None:
@@ -517,9 +246,6 @@ def format_slack_message(ctx: ReportContext) -> str:
         meta_lines.append(f"*Alert ID:* {alert_id}")
     meta_block = "\n" + "\n".join(meta_lines) if meta_lines else ""
 
-    # Do not prefix with a separate [RCA] title line; the consumer can render
-    # section headings (Root Cause text, Findings, Investigation Trace) with
-    # larger fonts as needed.
     return f"""{conclusion_block}{provenance_block}{remediation_block}{trace_block}
 {cited_section}
 {cloudwatch_link}{meta_block}
@@ -533,6 +259,7 @@ def format_telegram_message(ctx: ReportContext) -> str:
     of Slack mrkdwn (``<url|label>``, ``##`` headings) which render as plain text
     without ``parse_mode``.
     """
+    sections = build_report_sections(ctx)
     duration_seconds = ctx.get("investigation_duration_seconds")
     alert_id = ctx.get("alert_id")
     derived_rc = _derive_root_cause_sentence(ctx)
@@ -540,56 +267,55 @@ def format_telegram_message(ctx: ReportContext) -> str:
 
     parts: list[str] = [_severity_telegram_header(ctx)]
 
-    top_log = _get_top_error_log(ctx.get("evidence") or {})
     baseline_noise = (
         derived_rc
         and _telegram_baseline_repeats_header(ctx, derived_rc)
         and root_cause_sentence != "Not determined (insufficient evidence)."
     )
-    if baseline_noise and not top_log:
+    if baseline_noise and not sections.top_log:
         pass
-    elif baseline_noise and top_log:
-        parts.append("<code>" + html.escape(top_log) + "</code>")
+    elif baseline_noise and sections.top_log:
+        parts.append("<code>" + html.escape(sections.top_log) + "</code>")
     else:
         rc = _to_telegram_html_body(root_cause_sentence)
-        if top_log:
-            rc += "\n<code>" + html.escape(top_log) + "</code>"
+        if sections.top_log:
+            rc += "\n<code>" + html.escape(sections.top_log) + "</code>"
         parts.append(rc)
 
-    validated_lines, non_validated_lines = _render_claim_lines_telegram(ctx)
-    if validated_lines:
-        parts.append("<b>Findings</b>\n" + "\n".join(validated_lines))
-    if non_validated_lines:
-        parts.append("<b>Non-Validated Claims (Inferred)</b>\n" + "\n".join(non_validated_lines))
+    if sections.findings:
+        lines = []
+        for c in sections.findings:
+            ev_str = f" [{', '.join(c.evidence_refs)}]" if c.evidence_refs else ""
+            lines.append(f"• {_to_telegram_html_body(c.text)}{ev_str}")
+        parts.append("<b>Findings</b>\n" + "\n".join(lines))
+    if sections.non_validated:
+        parts.append("<b>Non-Validated Claims (Inferred)</b>\n" + "\n".join(
+            f"• {_to_telegram_html_body(raw)}" for raw in sections.non_validated
+        ))
 
-    provenance_lines = _format_provenance_lines(ctx)
-    if provenance_lines:
+    if sections.provenance:
         prov = "\n".join(
             "• " + _to_telegram_html_body(_sanitize_for_slack(pl.lstrip("• ").strip()))
-            for pl in provenance_lines
+            for pl in sections.provenance
         )
         parts.append("<b>Provenance</b>\n" + prov)
 
-    remediation_steps = ctx.get("remediation_steps", [])
-    if remediation_steps:
+    if sections.remediation:
         ra = "\n".join(
             "• " + _to_telegram_html_body(_sanitize_for_slack(str(step)))
-            for step in remediation_steps
+            for step in sections.remediation
         )
         parts.append("<b>Recommended Actions</b>\n" + ra)
 
-    trace_steps = build_investigation_trace(ctx)
-    if trace_steps:
-        tr = "\n".join(_to_telegram_html_body(step) for step in trace_steps)
+    if sections.trace:
+        tr = "\n".join(_to_telegram_html_body(step) for step in sections.trace)
         parts.append("<b>Investigation Trace</b>\n" + tr)
 
-    cited_block = format_cited_evidence_section_html(ctx).strip()
-    if cited_block:
-        parts.append(cited_block)
+    if sections.evidence_citations_html:
+        parts.append(sections.evidence_citations_html)
 
-    cw_block = render_cloudwatch_link_html(ctx).strip()
-    if cw_block:
-        parts.append(cw_block)
+    if sections.cloudwatch_html:
+        parts.append(sections.cloudwatch_html)
 
     meta_bits: list[str] = []
     if duration_seconds is not None:
@@ -615,9 +341,9 @@ def build_slack_blocks(ctx: ReportContext) -> list[dict]:
     """
     from typing import Any
 
+    sections = build_report_sections(ctx)
     duration_seconds = ctx.get("investigation_duration_seconds")
     alert_id = ctx.get("alert_id")
-    root_cause_sentence = _derive_root_cause_sentence(ctx)
     blocks: list[dict[str, Any]] = []
 
     def _add(block: "dict[str, Any] | None") -> None:
@@ -625,12 +351,9 @@ def build_slack_blocks(ctx: ReportContext) -> list[dict]:
             blocks.append(block)
 
     # ── Root Cause
-    if not root_cause_sentence:
-        root_cause_sentence = "Not determined (insufficient evidence)"
-    rc_text = root_cause_sentence
-    top_log = _get_top_error_log(ctx.get("evidence") or {})
-    if top_log:
-        rc_text += f"\n`{top_log}`"
+    rc_text = sections.root_cause
+    if sections.top_log:
+        rc_text += f"\n`{sections.top_log}`"
     _add(_mrkdwn_section(rc_text))
 
     # ── Failed Pods ──
@@ -652,8 +375,8 @@ def build_slack_blocks(ctx: ReportContext) -> list[dict]:
         _add(_mrkdwn_section("\n".join(pod_lines)))
 
     # ── Validated Claims (Findings) and Non-Validated Claims ──
-    validated_lines, non_validated_lines = _render_claim_lines(ctx)
-    if validated_lines:
+    if sections.findings:
+        lines = [f"• {c.text} [{', '.join(c.evidence_refs)}]" if c.evidence_refs else f"• {c.text}" for c in sections.findings]
         blocks.append({"type": "divider"})
         blocks.append(
             {
@@ -661,12 +384,11 @@ def build_slack_blocks(ctx: ReportContext) -> list[dict]:
                 "text": {"type": "plain_text", "text": "Findings"},
             }
         )
-        _add(_mrkdwn_section("\n".join(validated_lines)))
-    if non_validated_lines:
-        _add(_mrkdwn_section("*Inferred (not yet validated)*\n" + "\n".join(non_validated_lines)))
+        _add(_mrkdwn_section("\n".join(lines)))
+    if sections.non_validated:
+        _add(_mrkdwn_section("*Inferred (not yet validated)*\n" + "\n".join(sections.non_validated)))
 
-    correlation_signal_lines, correlation_driver_lines = _format_correlation_lines(ctx)
-    if correlation_signal_lines or correlation_driver_lines:
+    if sections.correlation_signals or sections.correlation_drivers:
         blocks.append({"type": "divider"})
         blocks.append(
             {
@@ -674,17 +396,16 @@ def build_slack_blocks(ctx: ReportContext) -> list[dict]:
                 "text": {"type": "plain_text", "text": "Upstream Correlation"},
             }
         )
-        if correlation_signal_lines:
-            _add(_mrkdwn_section("*Correlated signals:*\n" + "\n".join(correlation_signal_lines)))
-        if correlation_driver_lines:
+        if sections.correlation_signals:
+            _add(_mrkdwn_section("*Correlated signals:*\n" + "\n".join(sections.correlation_signals)))
+        if sections.correlation_drivers:
             _add(
                 _mrkdwn_section(
-                    "*Most likely causal drivers:*\n" + "\n".join(correlation_driver_lines)
+                    "*Most likely causal drivers:*\n" + "\n".join(sections.correlation_drivers)
                 )
             )
 
-    provenance_lines = _format_provenance_lines(ctx)
-    if provenance_lines:
+    if sections.provenance:
         blocks.append({"type": "divider"})
         blocks.append(
             {
@@ -692,11 +413,10 @@ def build_slack_blocks(ctx: ReportContext) -> list[dict]:
                 "text": {"type": "plain_text", "text": "Provenance"},
             }
         )
-        _add(_mrkdwn_section("\n".join(provenance_lines)))
+        _add(_mrkdwn_section("\n".join(sections.provenance)))
 
     # ── Recommended Actions ──
-    remediation_steps = ctx.get("remediation_steps", [])
-    if remediation_steps:
+    if sections.remediation:
         blocks.append({"type": "divider"})
         blocks.append(
             {
@@ -704,11 +424,10 @@ def build_slack_blocks(ctx: ReportContext) -> list[dict]:
                 "text": {"type": "plain_text", "text": "Recommended Actions"},
             }
         )
-        _add(_mrkdwn_section("\n".join(f"• {_sanitize_for_slack(s)}" for s in remediation_steps)))
+        _add(_mrkdwn_section("\n".join(f"• {_sanitize_for_slack(s)}" for s in sections.remediation)))
 
     # ── Investigation Trace ──
-    trace_steps = build_investigation_trace(ctx)
-    if trace_steps:
+    if sections.trace:
         blocks.append({"type": "divider"})
         blocks.append(
             {
@@ -716,13 +435,12 @@ def build_slack_blocks(ctx: ReportContext) -> list[dict]:
                 "text": {"type": "plain_text", "text": "Investigation Trace"},
             }
         )
-        _add(_mrkdwn_section("\n".join(trace_steps)))
+        _add(_mrkdwn_section("\n".join(sections.trace)))
 
     # ── Cited Evidence ──
-    cited_section = format_cited_evidence_section(ctx).strip()
-    if cited_section:
+    if sections.evidence_citations_plain:
         blocks.append({"type": "divider"})
-        _add(_mrkdwn_section(cited_section))
+        _add(_mrkdwn_section(sections.evidence_citations_plain))
 
     # ── CloudWatch link ──
     cw_link = render_cloudwatch_link(ctx).strip()

@@ -105,16 +105,26 @@ _EMBED_TITLE_LIMIT = 256
 _EMBED_DESCRIPTION_LIMIT = 4096
 
 
-def send_discord_report(report: str, discord_ctx: dict[str, Any]) -> tuple[bool, str]:
+def send_discord_report(
+    report: str,
+    discord_ctx: dict[str, Any],
+    *,
+    embeds: list[dict[str, Any]] | None = None,
+) -> tuple[bool, str]:
     channel_id: str = str(discord_ctx.get("channel_id") or "")
     thread_id: str = str(discord_ctx.get("thread_id") or "")
     bot_token: str = str(discord_ctx.get("bot_token") or "")
-    embed = {
-        "title": truncate("Investigation Complete", _EMBED_TITLE_LIMIT, suffix="…"),
-        "color": 15158332,
-        "description": truncate(report, _EMBED_DESCRIPTION_LIMIT, suffix="…"),
-        "footer": {"text": "OpenSRE Investigation"},
-    }
     target = thread_id if thread_id else channel_id
-    post_message_success, error, _ = post_discord_message(target, [embed], bot_token)
+    if embeds:
+        post_message_success, error, _ = post_discord_message(
+            target, embeds, bot_token, content=report
+        )
+    else:
+        embed = {
+            "title": truncate("Investigation Complete", _EMBED_TITLE_LIMIT, suffix="…"),
+            "color": 15158332,
+            "description": truncate(report, _EMBED_DESCRIPTION_LIMIT, suffix="…"),
+            "footer": {"text": "OpenSRE Investigation"},
+        }
+        post_message_success, error, _ = post_discord_message(target, [embed], bot_token)
     return (True, "") if post_message_success else (False, error)

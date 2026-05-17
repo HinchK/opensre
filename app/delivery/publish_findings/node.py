@@ -89,6 +89,7 @@ def generate_report(state: InvestigationState) -> dict:
 
     # Discord delivery — uses integration credentials if configured
     if discord_creds:
+        from app.delivery.publish_findings.formatters.discord import format_discord_message
         from app.utils.discord_delivery import send_discord_report
 
         discord_ctx = state.get("discord_context") or {}
@@ -102,9 +103,11 @@ def generate_report(state: InvestigationState) -> dict:
             bool(bot_token),
         )
         if bot_token and channel_id:
+            discord_content, discord_embeds = format_discord_message(ctx)
             discord_posted, discord_error = send_discord_report(
-                slack_message,
+                discord_content,
                 {"bot_token": bot_token, "channel_id": channel_id, "thread_id": thread_id},
+                embeds=discord_embeds,
             )
             logger.debug(
                 "[publish] discord delivery: posted=%s error=%s", discord_posted, discord_error
