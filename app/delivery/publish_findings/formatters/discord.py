@@ -106,7 +106,7 @@ def format_discord_message(ctx: ReportContext) -> tuple[str, list[dict[str, Any]
         )
 
     if sections.non_validated:
-        lines = [f"• {raw}" for raw in sections.non_validated]
+        lines = [f"• {raw.lstrip('• ').strip()}" for raw in sections.non_validated]
         embed["fields"].append(
             {
                 "name": "Non-Validated Claims (Inferred)",

@@ -238,7 +238,7 @@ def _format_correlation_lines(ctx: ReportContext) -> tuple[list[str], list[str]]
         confidence_text = (
             f" confidence={float(confidence):.2f}" if isinstance(confidence, int | float) else ""
         )
-        suffix = f" — {_sanitize_for_slack(str(rationale))}" if rationale else ""
+        suffix = f" — {str(rationale)}" if rationale else ""
         driver_lines.append(f"• {name}{confidence_text}{suffix}")
 
     return signal_lines, driver_lines
@@ -257,7 +257,8 @@ def _render_claim_lines(ctx: ReportContext) -> tuple[list[ClaimLine], list[str]]
     for claim_data in ctx.get("validated_claims", []):
         claim = claim_data.get("claim", "")
         claim = _resolve_evidence_tags(claim, evidence)
-        claim = _sanitize_for_slack(claim)
+        # Do NOT call _sanitize_for_slack here — this is a channel-agnostic
+        # layer. Each formatter applies its own markup (mrkdwn, HTML, etc.).
         evidence_ids = claim_data.get("evidence_ids", [])
         evidence_labels = claim_data.get("evidence_labels", [])
         evidence_refs: list[EvidenceRef] = []
@@ -272,8 +273,7 @@ def _render_claim_lines(ctx: ReportContext) -> tuple[list[ClaimLine], list[str]]
         validated_lines.append(ClaimLine(text=claim, evidence_refs=evidence_refs))
 
     non_validated_lines: list[str] = [
-        f"\u2022 {_sanitize_for_slack(cd.get('claim', ''))}"
-        for cd in ctx.get("non_validated_claims", [])
+        f"\u2022 {cd.get('claim', '')}" for cd in ctx.get("non_validated_claims", [])
     ]
 
     return validated_lines, non_validated_lines
