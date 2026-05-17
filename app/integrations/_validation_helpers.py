@@ -40,8 +40,8 @@ def report_validation_failure(
             they don't inflate Sentry's tag cardinality.
     """
     # Missing optional dependency — not a code bug, avoid Sentry noise.
-    if isinstance(exc, (ModuleNotFoundError, ImportError)):
-        getattr(logger, severity)("[%s] %s: %s", integration, method, exc)
+    if isinstance(exc, ModuleNotFoundError):
+        getattr(logger, severity)("[%s] %s: %s | extras=%s", integration, method, exc, extras)
         return
 
     report_exception(
