@@ -204,6 +204,7 @@ def _uses_openclaw_cli_mcp_bridge(config: OpenClawConfig) -> bool:
 def _looks_like_openclaw_gateway_unavailable(messages: list[str]) -> bool:
     indicators = (
         "connection closed",
+        "server closed the connection",
         "econnrefused",
         "connect failed",
         "could not connect",
@@ -359,7 +360,7 @@ def describe_openclaw_error(
             hints.append(
                 "The openclaw subprocess exited during MCP initialization. "
                 "Run the command manually to check for startup errors: "
-                f"`{config.command} {' '.join(config.args)}`."
+                f"`{config.command}{' ' + ' '.join(config.args) if config.args else ''}`."
             )
         else:
             hints.append(
