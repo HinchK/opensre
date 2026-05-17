@@ -420,18 +420,24 @@ class CLIBackedAgentClient:
         tool_calls: list[ToolCall] = []
         parsed_json = _try_parse_tool_call_json(text)
         if parsed_json is not None:
-            raw_calls = parsed_json.get("tool_calls") or []
-            for i, tc in enumerate(raw_calls):
-                if not isinstance(tc, dict):
-                    continue
-                tool_calls.append(
-                    ToolCall(
-                        id=str(tc.get("id") or f"call_{i}"),
-                        name=str(tc.get("name") or ""),
-                        input=tc.get("input") or {},
+            raw_calls = parsed_json.get("tool_calls")
+            if isinstance(raw_calls, list):
+                for i, tc in enumerate(raw_calls):
+                    if not isinstance(tc, dict):
+                        continue
+                    name = tc.get("name")
+                    if not isinstance(name, str) or not name.strip():
+                        continue
+                    raw_input = tc.get("input")
+                    input_payload = raw_input if isinstance(raw_input, dict) else {}
+                    tool_calls.append(
+                        ToolCall(
+                            id=str(tc.get("id") or f"call_{i}"),
+                            name=name.strip(),
+                            input=input_payload,
+                        )
                     )
-                )
-            content = ""
+            content = "" if tool_calls else text
         else:
             content = text
 
@@ -467,23 +473,42 @@ class CLIBackedAgentClient:
 
 
 def _try_parse_tool_call_json(text: str) -> dict[str, Any] | None:
-    """Return parsed JSON dict if *text* starts with (or fences) a tool_calls JSON object.
+    """Return parsed JSON dict if *text* contains a tool_calls JSON object.
 
-    Uses :meth:`json.JSONDecoder.raw_decode` so a single JSON value is parsed from
-    the start of the candidate without a greedy ``{...}`` span swallowing trailing
-    brace-containing prose and breaking :func:`json.loads`.
+    Uses :meth:`json.JSONDecoder.raw_decode` so a single JSON value is parsed
+    without a greedy ``{...}`` span swallowing trailing brace-containing prose and
+    breaking :func:`json.loads`.
     """
     cleaned = text.strip()
     fence = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", cleaned)
     candidate = (fence.group(1).strip() if fence else cleaned).strip()
     if not candidate:
         return None
-    try:
-        payload, _end = json.JSONDecoder().raw_decode(candidate)
-    except json.JSONDecodeError:
+
+    decoder = json.JSONDecoder()
+
+    def _decode_at(idx: int) -> dict[str, Any] | None:
+        try:
+            payload, _end = decoder.raw_decode(candidate, idx)
+        except json.JSONDecodeError:
+            return None
+        if isinstance(payload, dict) and "tool_calls" in payload:
+            return payload
         return None
-    if isinstance(payload, dict) and "tool_calls" in payload:
-        return payload
+
+    # Fast path: candidate is pure JSON (the preferred model behavior).
+    parsed = _decode_at(0)
+    if parsed is not None:
+        return parsed
+
+    # Recovery path: some CLI models prepend unfenced prose before the JSON
+    # object. Scan object starts and accept the first dict that contains
+    # "tool_calls".
+    for match in re.finditer(r"\{", candidate):
+        parsed = _decode_at(match.start())
+        if parsed is not None:
+            return parsed
+
     return None
 
 

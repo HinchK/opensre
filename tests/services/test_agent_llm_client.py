@@ -433,6 +433,17 @@ def test_try_parse_tool_call_json_uses_raw_decode_not_greedy_brace_span() -> Non
     assert parsed["tool_calls"][0]["name"] == "t1"
 
 
+def test_try_parse_tool_call_json_recovers_when_unfenced_preamble_precedes_json() -> None:
+    """Unfenced prose before JSON should still allow tool_calls extraction."""
+    from app.services import agent_llm_client as alc
+
+    text = 'Reasoning preamble {draft}\n{"tool_calls": [{"id": "a", "name": "t1", "input": {}}]}'
+    parsed = alc._try_parse_tool_call_json(text)
+    assert parsed is not None
+    assert len(parsed["tool_calls"]) == 1
+    assert parsed["tool_calls"][0]["name"] == "t1"
+
+
 def test_cli_backed_agent_client_reuses_single_cli_llm_client() -> None:
     """CLIBackedLLMClient should be constructed once so probe cache spans invokes."""
     import types as _types
@@ -508,3 +519,39 @@ def test_cli_backed_agent_client_plain_text_response() -> None:
 
     assert not result.has_tool_calls
     assert result.content == "The root cause is a memory leak."
+
+
+def test_cli_backed_agent_client_invalid_tool_json_falls_back_to_text_response() -> None:
+    """Malformed tool_calls payload should not erase the model's textual response."""
+    import types as _types
+    import unittest.mock as mock
+
+    from app.services.agent_llm_client import CLIBackedAgentClient
+    from app.services.llm_client import LLMResponse
+
+    fake_adapter = _types.SimpleNamespace(
+        name="codex",
+        binary_env_key="CODEX_BIN",
+        install_hint="",
+        auth_hint="codex login",
+        default_exec_timeout_sec=30.0,
+        detect=lambda: _types.SimpleNamespace(
+            installed=True, bin_path="/usr/bin/codex", logged_in=True, detail=""
+        ),
+        build=lambda **_kw: _types.SimpleNamespace(
+            argv=("/usr/bin/codex",), stdin="", cwd="/", env=None, timeout_sec=30.0
+        ),
+        parse=lambda **_kw: "",
+        explain_failure=lambda **_kw: "",
+    )
+    client = CLIBackedAgentClient(fake_adapter, model=None)
+    raw = '{"tool_calls":"not-a-list"}'
+
+    with mock.patch(
+        "app.integrations.llm_cli.runner.CLIBackedLLMClient.invoke",
+        return_value=LLMResponse(content=raw),
+    ):
+        result = client.invoke([{"role": "user", "content": "summarise"}])
+
+    assert not result.has_tool_calls
+    assert result.content == raw
