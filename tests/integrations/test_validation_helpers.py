@@ -96,3 +96,29 @@ class TestReportValidationFailure:
             )
         mock_cap.assert_called_once()
         assert mock_cap.call_args[0][0] is exc
+
+    def test_module_not_found_skips_sentry(self) -> None:
+        mock_log = _mock_logger()
+        exc = ModuleNotFoundError("No module named 'clickhouse_connect'")
+        with patch("app.utils.errors.capture_exception") as mock_cap:
+            report_validation_failure(
+                exc,
+                logger=mock_log,
+                integration="clickhouse",
+                method="validate_clickhouse_config",
+            )
+        mock_cap.assert_not_called()
+        mock_log.warning.assert_called_once()
+
+    def test_import_error_skips_sentry(self) -> None:
+        mock_log = _mock_logger()
+        exc = ImportError("cannot import name 'x' from 'y'")
+        with patch("app.utils.errors.capture_exception") as mock_cap:
+            report_validation_failure(
+                exc,
+                logger=mock_log,
+                integration="signoz",
+                method="validate_signoz_config",
+            )
+        mock_cap.assert_not_called()
+        mock_log.warning.assert_called_once()

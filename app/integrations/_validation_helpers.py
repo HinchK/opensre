@@ -39,6 +39,11 @@ def report_validation_failure(
             Merged into Sentry ``extra`` without becoming Sentry tags, so
             they don't inflate Sentry's tag cardinality.
     """
+    # Missing optional dependency — not a code bug, avoid Sentry noise.
+    if isinstance(exc, (ModuleNotFoundError, ImportError)):
+        getattr(logger, severity)("[%s] %s: %s", integration, method, exc)
+        return
+
     report_exception(
         exc,
         logger=logger,
