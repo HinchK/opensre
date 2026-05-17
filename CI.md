@@ -46,10 +46,10 @@ Do **module-scoped tests by default**.
 ### A. Identify changed files
 
 ```bash
-git diff --name-only HEAD~1
+git diff --name-only $(git merge-base HEAD main)
 ```
 
-(Or diff against your base branch.)
+(Use `git diff --name-only HEAD~1` only for quick single-commit checks.)
 
 ### B. Run matching tests for touched paths
 
@@ -60,8 +60,8 @@ git diff --name-only HEAD~1
 | `app/integrations/` | `uv run pytest tests/integrations/ -v` |
 | `app/integrations/llm_cli/` | `uv run pytest tests/integrations/llm_cli/ -v` |
 | `app/integrations/opensre/` | `uv run pytest tests/integrations/opensre/ -v` |
-| `app/pipeline/` | `uv run pytest tests/pipeline/ -v` |
-| `app/nodes/` | `uv run pytest tests/nodes/ -v` |
+| `app/pipeline/` | `make test-cov` |
+| `app/nodes/` | `make test-cov` |
 | `app/agent/` or `app/agents/` | `uv run pytest tests/agent/ tests/agents/ -v` |
 | `app/cli/` | `uv run pytest tests/cli/ -v` |
 | `app/entrypoints/` | `uv run pytest tests/entrypoints/ -v` |
@@ -75,9 +75,9 @@ git diff --name-only HEAD~1
 | `app/auth/` | `uv run pytest tests/app/auth/ -v` |
 | `app/hermes/` | `uv run pytest tests/hermes/ tests/synthetic/hermes_rca/ -v` |
 | `app/watch_dog/` | `uv run pytest tests/watch_dog/ -v` |
-| `app/types/` | `uv run pytest tests/types/ -v` |
-| `app/state/` | `uv run pytest tests/test_state.py tests/types/ -v` |
-| `app/utils/` | `uv run pytest tests/utils/ -v` |
+| `app/types/` | `make test-cov` |
+| `app/state/` | `make test-cov` |
+| `app/utils/` | `make test-cov` |
 | `app/webapp.py` | `uv run pytest tests/test_webapp.py -v` |
 | Other `app/` paths (no direct mapping above) | `make test-cov` |
 | `tests/...` only | Run the exact changed test files/directories |
