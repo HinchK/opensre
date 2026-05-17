@@ -272,7 +272,8 @@ def _render_claim_lines(ctx: ReportContext) -> tuple[list[ClaimLine], list[str]]
         validated_lines.append(ClaimLine(text=claim, evidence_refs=evidence_refs))
 
     non_validated_lines: list[str] = [
-        _sanitize_for_slack(cd.get("claim", "")) for cd in ctx.get("non_validated_claims", [])
+        f"\u2022 {_sanitize_for_slack(cd.get('claim', ''))}"
+        for cd in ctx.get("non_validated_claims", [])
     ]
 
     return validated_lines, non_validated_lines
