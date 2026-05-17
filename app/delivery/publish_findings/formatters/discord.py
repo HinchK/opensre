@@ -69,7 +69,11 @@ def format_discord_message(ctx: ReportContext) -> tuple[str, list[dict[str, Any]
     duration_seconds = ctx.get("investigation_duration_seconds")
     alert_id = ctx.get("alert_id")
 
-    content_text = f"**{alert_name}** — {pipeline_name}\n{sections.root_cause}"
+    _DISCORD_CONTENT_LIMIT = 2000
+    content_text = _truncate(
+        f"**{alert_name}** — {pipeline_name}\n{sections.root_cause}",
+        _DISCORD_CONTENT_LIMIT,
+    )
 
     embed: dict[str, Any] = {
         "title": _truncate(f"{alert_name} — RCA Report", 256),
