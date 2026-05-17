@@ -72,6 +72,8 @@ def test_sync_provider_env_codex_writes_codex_model(tmp_path) -> None:
 def test_sync_provider_env_permission_error(tmp_path) -> None:
     env_path = tmp_path / ".env"
     env_path.write_text("LLM_PROVIDER=anthropic\n", encoding="utf-8")
+    # PosixPath instances are C-backed and don't allow per-instance attribute
+    # patching, so we patch at the class level.
     with (
         patch("pathlib.Path.write_text", side_effect=PermissionError("denied")),
         pytest.raises(PermissionError, match="Cannot write to"),
