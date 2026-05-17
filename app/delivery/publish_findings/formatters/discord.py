@@ -189,4 +189,29 @@ def format_discord_message(ctx: ReportContext) -> tuple[str, list[dict[str, Any]
     if len(embed["fields"]) > _DISCORD_MAX_FIELDS:
         embed["fields"] = embed["fields"][:_DISCORD_MAX_FIELDS]
 
+    # Discord enforces a hard 6000-char limit across all embed text.
+    # Trim lower-priority fields if the total exceeds the budget.
+    _DISCORD_TOTAL_EMBED_LIMIT = 6000
+    while True:
+        total = len(embed.get("title", ""))
+        total += len(embed.get("description", ""))
+        total += sum(len(f["name"]) + len(f["value"]) for f in embed["fields"])
+        total += len(embed.get("footer", {}).get("text", ""))
+        if total <= _DISCORD_TOTAL_EMBED_LIMIT:
+            break
+        # Drop the last non-essential field
+        essential = {"Top Error Log", "Findings"}
+        dropped = False
+        for i in range(len(embed["fields"]) - 1, -1, -1):
+            if embed["fields"][i]["name"] not in essential:
+                embed["fields"].pop(i)
+                dropped = True
+                break
+        if not dropped:
+            # Last resort: truncate description
+            embed["description"] = _truncate(
+                embed["description"], _DISCORD_TOTAL_EMBED_LIMIT - total + len(embed["description"])
+            )
+            break
+
     return content_text, [embed]
