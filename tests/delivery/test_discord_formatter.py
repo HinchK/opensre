@@ -144,10 +144,7 @@ def test_discord_embed_description_respects_4096_limit() -> None:
 
 def test_discord_max_25_fields() -> None:
     state = _make_state()
-    state["validated_claims"] = [
-        {"claim": f"Claim {i}", "evidence_sources": []}
-        for i in range(30)
-    ]
+    state["validated_claims"] = [{"claim": f"Claim {i}", "evidence_sources": []} for i in range(30)]
     ctx = build_report_context(state)
     _, embeds = format_discord_message(ctx)
 

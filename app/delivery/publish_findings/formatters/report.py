@@ -201,7 +201,10 @@ def format_slack_message(ctx: ReportContext) -> str:
         conclusion_block += f"`{sections.top_log}`\n"
 
     if sections.findings:
-        lines = [f"• {c.text} [{', '.join(c.evidence_refs)}]" if c.evidence_refs else f"• {c.text}" for c in sections.findings]
+        lines = [
+            f"• {c.text} [{', '.join(c.evidence_refs)}]" if c.evidence_refs else f"• {c.text}"
+            for c in sections.findings
+        ]
         conclusion_block += "\n## Findings\n" + "\n".join(lines) + "\n"
     if sections.non_validated:
         conclusion_block += (
@@ -289,9 +292,10 @@ def format_telegram_message(ctx: ReportContext) -> str:
             lines.append(f"• {_to_telegram_html_body(c.text)}{ev_str}")
         parts.append("<b>Findings</b>\n" + "\n".join(lines))
     if sections.non_validated:
-        parts.append("<b>Non-Validated Claims (Inferred)</b>\n" + "\n".join(
-            f"• {_to_telegram_html_body(raw)}" for raw in sections.non_validated
-        ))
+        parts.append(
+            "<b>Non-Validated Claims (Inferred)</b>\n"
+            + "\n".join(f"• {_to_telegram_html_body(raw)}" for raw in sections.non_validated)
+        )
 
     if sections.provenance:
         prov = "\n".join(
@@ -376,7 +380,10 @@ def build_slack_blocks(ctx: ReportContext) -> list[dict]:
 
     # ── Validated Claims (Findings) and Non-Validated Claims ──
     if sections.findings:
-        lines = [f"• {c.text} [{', '.join(c.evidence_refs)}]" if c.evidence_refs else f"• {c.text}" for c in sections.findings]
+        lines = [
+            f"• {c.text} [{', '.join(c.evidence_refs)}]" if c.evidence_refs else f"• {c.text}"
+            for c in sections.findings
+        ]
         blocks.append({"type": "divider"})
         blocks.append(
             {
@@ -386,7 +393,9 @@ def build_slack_blocks(ctx: ReportContext) -> list[dict]:
         )
         _add(_mrkdwn_section("\n".join(lines)))
     if sections.non_validated:
-        _add(_mrkdwn_section("*Inferred (not yet validated)*\n" + "\n".join(sections.non_validated)))
+        _add(
+            _mrkdwn_section("*Inferred (not yet validated)*\n" + "\n".join(sections.non_validated))
+        )
 
     if sections.correlation_signals or sections.correlation_drivers:
         blocks.append({"type": "divider"})
@@ -397,7 +406,9 @@ def build_slack_blocks(ctx: ReportContext) -> list[dict]:
             }
         )
         if sections.correlation_signals:
-            _add(_mrkdwn_section("*Correlated signals:*\n" + "\n".join(sections.correlation_signals)))
+            _add(
+                _mrkdwn_section("*Correlated signals:*\n" + "\n".join(sections.correlation_signals))
+            )
         if sections.correlation_drivers:
             _add(
                 _mrkdwn_section(
@@ -424,7 +435,9 @@ def build_slack_blocks(ctx: ReportContext) -> list[dict]:
                 "text": {"type": "plain_text", "text": "Recommended Actions"},
             }
         )
-        _add(_mrkdwn_section("\n".join(f"• {_sanitize_for_slack(s)}" for s in sections.remediation)))
+        _add(
+            _mrkdwn_section("\n".join(f"• {_sanitize_for_slack(s)}" for s in sections.remediation))
+        )
 
     # ── Investigation Trace ──
     if sections.trace:

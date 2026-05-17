@@ -263,8 +263,7 @@ def _render_claim_lines(ctx: ReportContext) -> tuple[list[ClaimLine], list[str]]
         validated_lines.append(ClaimLine(text=claim, evidence_refs=evidence_refs))
 
     non_validated_lines: list[str] = [
-        _sanitize_for_slack(cd.get("claim", ""))
-        for cd in ctx.get("non_validated_claims", [])
+        _sanitize_for_slack(cd.get("claim", "")) for cd in ctx.get("non_validated_claims", [])
     ]
 
     return validated_lines, non_validated_lines
@@ -342,7 +341,9 @@ def build_report_sections(ctx: ReportContext) -> ReportSections:
 
     evidence = ctx.get("evidence") or {}
 
-    root_cause_sentence = _derive_root_cause_sentence(ctx) or "Not determined (insufficient evidence)."
+    root_cause_sentence = (
+        _derive_root_cause_sentence(ctx) or "Not determined (insufficient evidence)."
+    )
     top_log = _get_top_error_log(evidence)
 
     validated_claims, non_validated = _render_claim_lines(ctx)

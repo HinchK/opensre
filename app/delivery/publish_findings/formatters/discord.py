@@ -81,30 +81,36 @@ def format_discord_message(ctx: ReportContext) -> tuple[str, list[dict[str, Any]
     }
 
     if sections.top_log:
-        embed["fields"].append({
-            "name": "Top Error Log",
-            "value": f"```\n{_truncate(sections.top_log, _DISCORD_FIELD_VALUE_LIMIT)}\n```",
-            "inline": False,
-        })
+        embed["fields"].append(
+            {
+                "name": "Top Error Log",
+                "value": f"```\n{_truncate(sections.top_log, _DISCORD_FIELD_VALUE_LIMIT)}\n```",
+                "inline": False,
+            }
+        )
 
     if sections.findings:
         lines = []
         for c in sections.findings:
             ev = f" [{', '.join(c.evidence_refs)}]" if c.evidence_refs else ""
             lines.append(f"• {c.text}{ev}")
-        embed["fields"].append({
-            "name": "Findings",
-            "value": _format_field_value(lines),
-            "inline": False,
-        })
+        embed["fields"].append(
+            {
+                "name": "Findings",
+                "value": _format_field_value(lines),
+                "inline": False,
+            }
+        )
 
     if sections.non_validated:
         lines = [f"• {raw}" for raw in sections.non_validated]
-        embed["fields"].append({
-            "name": "Non-Validated Claims (Inferred)",
-            "value": _format_field_value(lines),
-            "inline": False,
-        })
+        embed["fields"].append(
+            {
+                "name": "Non-Validated Claims (Inferred)",
+                "value": _format_field_value(lines),
+                "inline": False,
+            }
+        )
 
     if sections.correlation_signals or sections.correlation_drivers:
         corr_lines: list[str] = []
@@ -114,50 +120,62 @@ def format_discord_message(ctx: ReportContext) -> tuple[str, list[dict[str, Any]
         if sections.correlation_drivers:
             corr_lines.append("**Most likely causal drivers:**")
             corr_lines.extend(sections.correlation_drivers)
-        embed["fields"].append({
-            "name": "Upstream Correlation",
-            "value": _format_field_value(corr_lines),
-            "inline": False,
-        })
+        embed["fields"].append(
+            {
+                "name": "Upstream Correlation",
+                "value": _format_field_value(corr_lines),
+                "inline": False,
+            }
+        )
 
     if sections.provenance:
         sanitized = [_sanitize_for_slack(pl.lstrip("• ").strip()) for pl in sections.provenance]
         lines = [f"• {s}" for s in sanitized]
-        embed["fields"].append({
-            "name": "Provenance",
-            "value": _format_field_value(lines),
-            "inline": False,
-        })
+        embed["fields"].append(
+            {
+                "name": "Provenance",
+                "value": _format_field_value(lines),
+                "inline": False,
+            }
+        )
 
     if sections.remediation:
         lines = [f"• {_sanitize_for_slack(s)}" for s in sections.remediation]
-        embed["fields"].append({
-            "name": "Recommended Actions",
-            "value": _format_field_value(lines),
-            "inline": False,
-        })
+        embed["fields"].append(
+            {
+                "name": "Recommended Actions",
+                "value": _format_field_value(lines),
+                "inline": False,
+            }
+        )
 
     if sections.trace:
-        embed["fields"].append({
-            "name": "Investigation Trace",
-            "value": _format_field_value(sections.trace),
-            "inline": False,
-        })
+        embed["fields"].append(
+            {
+                "name": "Investigation Trace",
+                "value": _format_field_value(sections.trace),
+                "inline": False,
+            }
+        )
 
     if sections.evidence_citations_plain:
-        embed["fields"].append({
-            "name": "Cited Evidence",
-            "value": _truncate(sections.evidence_citations_plain, _DISCORD_FIELD_VALUE_LIMIT),
-            "inline": False,
-        })
+        embed["fields"].append(
+            {
+                "name": "Cited Evidence",
+                "value": _truncate(sections.evidence_citations_plain, _DISCORD_FIELD_VALUE_LIMIT),
+                "inline": False,
+            }
+        )
 
     cw_url = ctx.get("cloudwatch_logs_url")
     if cw_url:
-        embed["fields"].append({
-            "name": "CloudWatch",
-            "value": f"[View logs]({cw_url})",
-            "inline": False,
-        })
+        embed["fields"].append(
+            {
+                "name": "CloudWatch",
+                "value": f"[View logs]({cw_url})",
+                "inline": False,
+            }
+        )
 
     meta_parts: list[str] = []
     if duration_seconds is not None:
