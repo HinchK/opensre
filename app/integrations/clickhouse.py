@@ -119,7 +119,13 @@ def clickhouse_config_from_env() -> ClickHouseConfig | None:
 
 def _get_client(config: ClickHouseConfig) -> Any:
     """Create a clickhouse_connect Client from config. Caller must close."""
-    import clickhouse_connect  # type: ignore[import-not-found,import-untyped]
+    try:
+        import clickhouse_connect  # type: ignore[import-not-found,import-untyped]
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "clickhouse-connect is not installed. "
+            "Install it with: pip install 'opensre[clickhouse]'"
+        ) from exc
 
     return clickhouse_connect.get_client(
         host=config.host,

@@ -1,8 +1,14 @@
 """Unit tests for the ClickHouse integration module."""
 
+import sys
+from unittest.mock import patch
+
+import pytest
+
 from app.integrations.clickhouse import (
     ClickHouseConfig,
     ClickHouseValidationResult,
+    _get_client,
     build_clickhouse_config,
     clickhouse_config_from_env,
 )
@@ -144,3 +150,15 @@ class TestClickHouseValidationResult:
         result = ClickHouseValidationResult(ok=False, detail="Connection refused.")
         assert result.ok is False
         assert result.detail == "Connection refused."
+
+
+class TestGetClient:
+    """Tests for _get_client helper."""
+
+    def test_raises_runtime_error_when_clickhouse_connect_missing(self) -> None:
+        config = ClickHouseConfig(host="localhost")
+        with (
+            patch.dict(sys.modules, {"clickhouse_connect": None}),
+            pytest.raises(RuntimeError, match="clickhouse-connect is not installed"),
+        ):
+            _get_client(config)
