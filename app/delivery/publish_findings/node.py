@@ -104,6 +104,8 @@ def generate_report(state: InvestigationState) -> dict:
         )
         if bot_token and channel_id:
             discord_content, discord_embeds = format_discord_message(ctx)
+            discord_content = masking_ctx.unmask(discord_content)
+            discord_embeds = masking_ctx.unmask_value(discord_embeds)
             discord_posted, discord_error = send_discord_report(
                 discord_content,
                 {"bot_token": bot_token, "channel_id": channel_id, "thread_id": thread_id},

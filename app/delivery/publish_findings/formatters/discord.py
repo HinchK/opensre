@@ -21,6 +21,7 @@ from app.delivery.publish_findings.report_context import ReportContext
 _DISCORD_FIELD_VALUE_LIMIT = 1024
 _DISCORD_EMBED_DESC_LIMIT = 4096
 _DISCORD_MAX_FIELDS = 25
+_DISCORD_CONTENT_LIMIT = 2000
 
 _SEVERITY_COLORS: dict[str, int] = {
     "critical": 15158332,
@@ -69,7 +70,6 @@ def format_discord_message(ctx: ReportContext) -> tuple[str, list[dict[str, Any]
     duration_seconds = ctx.get("investigation_duration_seconds")
     alert_id = ctx.get("alert_id")
 
-    _DISCORD_CONTENT_LIMIT = 2000
     content_text = _truncate(
         f"**{alert_name}** — {pipeline_name}\n{sections.root_cause}",
         _DISCORD_CONTENT_LIMIT,
@@ -95,11 +95,7 @@ def format_discord_message(ctx: ReportContext) -> tuple[str, list[dict[str, Any]
     if sections.findings:
         lines = []
         for c in sections.findings:
-            ev = (
-                f" [{', '.join(e.display_id for e in c.evidence_refs)}]"
-                if c.evidence_refs
-                else ""
-            )
+            ev = f" [{', '.join(e.display_id for e in c.evidence_refs)}]" if c.evidence_refs else ""
             lines.append(f"• {c.text}{ev}")
         embed["fields"].append(
             {
