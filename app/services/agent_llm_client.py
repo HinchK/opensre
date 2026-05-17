@@ -503,8 +503,10 @@ def _try_parse_tool_call_json(text: str) -> dict[str, Any] | None:
 
     # Recovery path: some CLI models prepend unfenced prose before the JSON
     # object. Scan object starts and accept the first dict that contains
-    # "tool_calls".
+    # "tool_calls". Skip index 0 because the fast path already attempted it.
     for match in re.finditer(r"\{", candidate):
+        if match.start() == 0:
+            continue
         parsed = _decode_at(match.start())
         if parsed is not None:
             return parsed
