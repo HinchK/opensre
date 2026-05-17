@@ -47,7 +47,13 @@ def sync_env_values(
     for key, value in values.items():
         lines = _set_env_value(lines, key, value)
 
-    target_path.write_text("".join(lines), encoding="utf-8")
+    try:
+        target_path.write_text("".join(lines), encoding="utf-8")
+    except PermissionError as exc:
+        raise PermissionError(
+            f"Cannot write to {target_path}: permission denied. "
+            "Check file ownership or run with elevated permissions."
+        ) from exc
     return target_path
 
 
@@ -134,5 +140,11 @@ def sync_provider_env(
     for key, value in values.items():
         lines = _set_env_value(lines, key, value)
 
-    target_path.write_text("".join(lines), encoding="utf-8")
+    try:
+        target_path.write_text("".join(lines), encoding="utf-8")
+    except PermissionError as exc:
+        raise PermissionError(
+            f"Cannot write to {target_path}: permission denied. "
+            "Check file ownership or run with elevated permissions."
+        ) from exc
     return target_path

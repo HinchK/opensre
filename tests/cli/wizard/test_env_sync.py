@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from unittest.mock import patch
+
+import pytest
+
 from app.cli.wizard.config import PROVIDER_BY_VALUE
-from app.cli.wizard.env_sync import sync_provider_env
+from app.cli.wizard.env_sync import sync_env_values, sync_provider_env
 
 
 def test_sync_provider_env_updates_provider_specific_keys(tmp_path) -> None:
@@ -63,6 +67,30 @@ def test_sync_provider_env_codex_writes_codex_model(tmp_path) -> None:
     content = env_path.read_text(encoding="utf-8")
     assert "LLM_PROVIDER=codex\n" in content
     assert "CODEX_MODEL=\n" in content
+
+
+def test_sync_provider_env_permission_error(tmp_path) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text("LLM_PROVIDER=anthropic\n", encoding="utf-8")
+    with (
+        patch("pathlib.Path.write_text", side_effect=PermissionError("denied")),
+        pytest.raises(PermissionError, match="Cannot write to"),
+    ):
+        sync_provider_env(
+            provider=PROVIDER_BY_VALUE["openai"],
+            model="gpt-5-mini",
+            env_path=env_path,
+        )
+
+
+def test_sync_env_values_permission_error(tmp_path) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text("KEY=old\n", encoding="utf-8")
+    with (
+        patch("pathlib.Path.write_text", side_effect=PermissionError("denied")),
+        pytest.raises(PermissionError, match="Cannot write to"),
+    ):
+        sync_env_values({"KEY": "new"}, env_path=env_path)
 
 
 def test_sync_provider_env_gemini_cli_writes_model(tmp_path) -> None:
