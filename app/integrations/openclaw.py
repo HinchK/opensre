@@ -26,7 +26,12 @@ from typing import Literal, cast
 from urllib.parse import urlparse
 
 import httpx
-from mcp import ClientSession, StdioServerParameters, types  # type: ignore[import-not-found]
+from mcp import (  # type: ignore[import-not-found]
+    ClientSession,
+    McpError,
+    StdioServerParameters,
+    types,
+)
 from mcp.client.sse import sse_client  # type: ignore[import-not-found]
 from mcp.client.stdio import stdio_client  # type: ignore[import-not-found]
 from pydantic import Field, field_validator, model_validator
@@ -285,6 +290,15 @@ def _describe_exception(err: BaseException) -> list[str]:
     if isinstance(err, TimeoutError):
         return ["OpenClaw MCP tool call timed out"]
 
+    # ``McpError: Connection closed`` is raised when the MCP server process
+    # exits or the remote endpoint drops the connection before initialization
+    # completes. Surface a concrete hint rather than the raw protocol message.
+    if isinstance(err, McpError):
+        msg = str(err).strip()
+        if not msg or "connection closed" in msg.lower():
+            return ["OpenClaw MCP server closed the connection — the process may have exited or the server is unreachable"]
+        return [f"OpenClaw MCP error: {msg}"]
+
     return [str(err).strip() or err.__class__.__name__]
 
 
@@ -339,6 +353,19 @@ def describe_openclaw_error(
             "Check whether the OpenClaw Gateway is responsive (`openclaw gateway health`) "
             "or raise `OpenClawConfig.timeout_seconds` if the tool is expected to be slow."
         )
+
+    if any("server closed the connection" in message.lower() for message in messages):
+        if config.mode == "stdio":
+            hints.append(
+                "The openclaw subprocess exited during MCP initialization. "
+                "Run the command manually to check for startup errors: "
+                f"`{config.command} {' '.join(config.args)}`."
+            )
+        else:
+            hints.append(
+                "The remote MCP endpoint closed the connection. "
+                "Check that the OpenClaw server is running and reachable at the configured URL."
+            )
 
     if hints:
         return f"{detail} Hint: {' '.join(hints)}"
