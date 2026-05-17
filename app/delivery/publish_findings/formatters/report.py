@@ -204,9 +204,9 @@ def format_slack_message(ctx: ReportContext) -> str:
         for c in sections.findings:
             if c.evidence_refs:
                 refs = ", ".join(format_slack_link(e.display_id, e.url) for e in c.evidence_refs)
-                lines.append(f"• {c.text} [{refs}]")
+                lines.append(f"• {_sanitize_for_slack(c.text)} [{refs}]")
             else:
-                lines.append(f"• {c.text}")
+                lines.append(f"• {_sanitize_for_slack(c.text)}")
         conclusion_block += "\n## Findings\n" + "\n".join(lines) + "\n"
     if sections.non_validated:
         sanitized_nv = [_sanitize_for_slack(nv) for nv in sections.non_validated]
@@ -296,7 +296,7 @@ def format_telegram_message(ctx: ReportContext) -> str:
                 ev_str = f" [{refs}]"
             else:
                 ev_str = ""
-            lines.append(f"• {_to_telegram_html_body(c.text)}{ev_str}")
+            lines.append(f"• {_to_telegram_html_body(_sanitize_for_slack(c.text))}{ev_str}")
         parts.append("<b>Findings</b>\n" + "\n".join(lines))
     if sections.non_validated:
         parts.append(
@@ -391,9 +391,9 @@ def build_slack_blocks(ctx: ReportContext) -> list[dict]:
         for c in sections.findings:
             if c.evidence_refs:
                 refs = ", ".join(format_slack_link(e.display_id, e.url) for e in c.evidence_refs)
-                lines.append(f"• {c.text} [{refs}]")
+                lines.append(f"• {_sanitize_for_slack(c.text)} [{refs}]")
             else:
-                lines.append(f"• {c.text}")
+                lines.append(f"• {_sanitize_for_slack(c.text)}")
         blocks.append({"type": "divider"})
         blocks.append(
             {
