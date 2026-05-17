@@ -301,7 +301,9 @@ def format_telegram_message(ctx: ReportContext) -> str:
     if sections.non_validated:
         parts.append(
             "<b>Non-Validated Claims (Inferred)</b>\n"
-            + "\n".join(_to_telegram_html_body(raw) for raw in sections.non_validated)
+            + "\n".join(
+                _to_telegram_html_body(_sanitize_for_slack(raw)) for raw in sections.non_validated
+            )
         )
 
     if sections.provenance:

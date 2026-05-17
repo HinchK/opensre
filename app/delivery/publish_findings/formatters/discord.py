@@ -22,6 +22,7 @@ _DISCORD_FIELD_VALUE_LIMIT = 1024
 _DISCORD_EMBED_DESC_LIMIT = 4096
 _DISCORD_MAX_FIELDS = 25
 _DISCORD_CONTENT_LIMIT = 2000
+_DISCORD_TOTAL_EMBED_LIMIT = 6000
 
 _SEVERITY_COLORS: dict[str, int] = {
     "critical": 15158332,
@@ -191,7 +192,6 @@ def format_discord_message(ctx: ReportContext) -> tuple[str, list[dict[str, Any]
 
     # Discord enforces a hard 6000-char limit across all embed text.
     # Trim lower-priority fields if the total exceeds the budget.
-    _DISCORD_TOTAL_EMBED_LIMIT = 6000
     while True:
         total = len(embed.get("title", ""))
         total += len(embed.get("description", ""))
