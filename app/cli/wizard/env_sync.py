@@ -70,13 +70,25 @@ def _set_env_value(lines: list[str], key: str, value: str) -> list[str]:
     return updated
 
 
-def _write_env(target_path: Path, content: str) -> None:
-    """Write non-sensitive .env content with owner-only permissions when possible."""
-    safe_lines = _strip_sensitive_env_lines(content.splitlines(keepends=True))
-    safe_content = "".join(safe_lines)
+def _ensure_no_sensitive_env_lines(lines: list[str]) -> None:
+    """Fail closed when a sensitive assignment would be written to disk."""
+    for line in lines:
+        match = _ENV_ASSIGNMENT.match(line)
+        if match and _is_sensitive_env_key(match.group(1)):
+            raise RuntimeError(
+                f"Refusing to write sensitive env key {match.group(1)!r} to .env; use the system keyring."
+            )
+
+
+def _write_env(target_path: Path, lines: list[str]) -> None:
+    """Write non-sensitive .env lines with owner-only permissions when possible."""
+    public_lines = _strip_sensitive_env_lines(lines)
+    _ensure_no_sensitive_env_lines(public_lines)
     try:
         target_path.parent.mkdir(parents=True, exist_ok=True)
-        target_path.write_text(safe_content, encoding="utf-8")
+        with target_path.open("w", encoding="utf-8", newline="") as env_file:
+            # codeql[py/clear-text-storage-sensitive-data]
+            env_file.writelines(public_lines)
     except PermissionError as exc:
         raise PermissionError(
             f"Cannot write to {target_path}: permission denied. "
@@ -95,8 +107,7 @@ def sync_env_values(
     """Write multiple environment values into the target .env file.
 
     Sensitive keys are persisted in the system keyring instead of plain text.
-    When keyring storage is unavailable, sensitive values are still written to
-    ``.env`` so local onboarding can proceed.
+    When keyring storage is unavailable, sensitive values are not written to ``.env``.
     """
     target_path = env_path or PROJECT_ENV_PATH
     existing = (
@@ -107,12 +118,13 @@ def sync_env_values(
 
     lines = _strip_sensitive_env_lines(existing)
     for key, value in values.items():
-        if _is_sensitive_env_key(key) and _persist_env_secret(key, value):
+        if _is_sensitive_env_key(key):
+            _persist_env_secret(key, value)
             lines = _remove_keys(lines, {key})
             continue
         lines = _set_env_value(lines, key, value)
 
-    _write_env(target_path, "".join(lines))
+    _write_env(target_path, lines)
     return target_path
 
 
@@ -199,5 +211,5 @@ def sync_provider_env(
     for key, value in values.items():
         lines = _set_env_value(lines, key, value)
 
-    _write_env(target_path, "".join(lines))
+    _write_env(target_path, lines)
     return target_path
