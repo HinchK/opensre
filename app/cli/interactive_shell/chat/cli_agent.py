@@ -38,6 +38,7 @@ from app.cli.interactive_shell.ui import (
 )
 from app.cli.support.exception_reporting import report_exception
 from app.integrations.llm_cli.errors import CLITimeoutError
+from app.services.llm_client import LLMProviderError
 
 # Cap stored (user, assistant) pairs; list holds 2 entries per turn.
 _MAX_CLI_AGENT_TURNS = 12
@@ -464,7 +465,7 @@ def answer_cli_agent(
         report_exception(
             exc,
             context="interactive_shell.cli_agent.stream",
-            expected=isinstance(exc, CLITimeoutError),
+            expected=isinstance(exc, (CLITimeoutError, LLMProviderError)),
         )
         console.print(f"[{ERROR}]assistant failed:[/] {escape(str(exc))}")
         return

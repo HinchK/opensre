@@ -363,6 +363,7 @@ def _init_sentry_once(
         CLITimeoutError,
         CLITransientError,
     )
+    from app.services.llm_client import LLMProviderError
 
     sentry_sdk.init(
         dsn=dsn,
@@ -384,6 +385,7 @@ def _init_sentry_once(
             CLIInterruptedError,
             CLITimeoutError,
             CLITransientError,
+            LLMProviderError,
         ],
     )
 

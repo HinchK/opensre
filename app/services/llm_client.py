@@ -98,6 +98,10 @@ class LLMResponse:
     content: str
 
 
+class LLMProviderError(RuntimeError):
+    """Raised when an LLM provider is unreachable or times out (network/config, not a code bug)."""
+
+
 class LLMClient:
     def __init__(
         self, *, model: str, max_tokens: int = 1024, temperature: float | None = None
@@ -750,13 +754,13 @@ class OpenAILLMClient:
                 raise
             except OpenAITimeoutError as err:
                 if attempt == max_attempts - 1:
-                    raise RuntimeError(
+                    raise LLMProviderError(
                         _format_openai_connection_error(err, self._provider_label)
                     ) from err
                 time.sleep(backoff_seconds)
                 backoff_seconds *= 2
             except OpenAIConnectionError as err:
-                raise RuntimeError(
+                raise LLMProviderError(
                     _format_openai_connection_error(err, self._provider_label)
                 ) from err
             except OpenAIRateLimitError as err:
@@ -848,7 +852,7 @@ class OpenAILLMClient:
                 if emitted:
                     raise
                 if attempt == max_attempts - 1:
-                    raise RuntimeError(
+                    raise LLMProviderError(
                         _format_openai_connection_error(err, self._provider_label)
                     ) from err
                 time.sleep(backoff_seconds)
@@ -856,7 +860,7 @@ class OpenAILLMClient:
             except OpenAIConnectionError as err:
                 if emitted:
                     raise
-                raise RuntimeError(
+                raise LLMProviderError(
                     _format_openai_connection_error(err, self._provider_label)
                 ) from err
             except OpenAIRateLimitError as err:
