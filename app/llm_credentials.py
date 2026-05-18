@@ -35,7 +35,7 @@ def resolve_llm_api_key(env_var: str) -> str:
         return ""
     try:
         return (keyring.get_password(_KEYRING_SERVICE, env_var) or "").strip()
-    except keyring.errors.KeyringError:
+    except Exception:
         return ""
 
 
@@ -101,7 +101,7 @@ def save_llm_api_key(env_var: str, value: str) -> None:
         raise RuntimeError("Secure local credential storage is disabled on this machine.")
     try:
         keyring.set_password(_KEYRING_SERVICE, env_var, normalized)
-    except keyring.errors.KeyringError as exc:
+    except Exception as exc:
         raise RuntimeError(
             "Secure local credential storage is unavailable on this machine."
         ) from exc
