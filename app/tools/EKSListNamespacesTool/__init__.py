@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import botocore.exceptions
+
 from app.services.eks.eks_k8s_client import build_k8s_clients
 from app.tools._telemetry import report_run_error
 from app.tools.EKSListClustersTool import _eks_available, _eks_creds
@@ -79,6 +81,9 @@ def list_eks_namespaces(
             "namespaces": namespaces,
             "error": None,
         }
+    except botocore.exceptions.ClientError as e:
+        logger.warning("[eks] list_eks_namespaces FAILED: %s", e)
+        return {"source": "eks", "available": False, "cluster_name": cluster_name, "error": str(e)}
     except Exception as e:
         report_run_error(
             e,
