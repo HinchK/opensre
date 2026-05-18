@@ -836,3 +836,22 @@ def test_bedrock_bad_request_generic_error_uses_default_message(
     message = str(exc.value)
     assert "Bedrock request rejected (HTTP 400)" in message
     assert "cross-region" not in message
+
+
+def test_bedrock_tool_schemas_include_type_custom(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_anthropic(monkeypatch)
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    client = BedrockAgentClient(model="us.anthropic.claude-sonnet-4-6")
+
+    tool = types.SimpleNamespace(
+        name="my_tool",
+        description="does something",
+        input_schema={"type": "object", "properties": {}},
+    )
+    schemas = client.tool_schemas([tool])
+
+    assert len(schemas) == 1
+    assert schemas[0]["type"] == "custom"
+    assert schemas[0]["name"] == "my_tool"
+    assert schemas[0]["description"] == "does something"
+    assert "input_schema" in schemas[0]

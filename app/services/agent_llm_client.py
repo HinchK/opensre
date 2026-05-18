@@ -254,6 +254,9 @@ class BedrockAgentClient(AnthropicAgentClient):
             "aws-marketplace:ViewSubscriptions and aws-marketplace:Subscribe."
         )
 
+    def tool_schemas(self, tools: list[Any]) -> list[dict[str, Any]]:
+        return [{"type": "custom", **_anthropic_tool_schema(t)} for t in tools]
+
     def _bad_request_error_message(self, err: Any) -> str:
         err_str = str(err)
         if "on-demand throughput" in err_str or "inference profile" in err_str.lower():
