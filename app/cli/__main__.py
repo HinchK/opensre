@@ -248,7 +248,8 @@ def main(argv: list[str] | None = None) -> int:
     except click.ClickException as exc:
         if _should_capture_cli_exception(exc):
             report_exception(exc, context="cli.main")
-        exc.show()
+        with suppress(BrokenPipeError):
+            exc.show()
         return exc.exit_code
     except click.exceptions.Exit as exc:
         return exc.exit_code

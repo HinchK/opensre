@@ -507,6 +507,24 @@ def test_default_no_args_enters_repl(monkeypatch) -> None:
     assert landing_calls == [], "REPL should run, not landing page"
 
 
+def test_main_survives_broken_pipe_on_click_exception(monkeypatch) -> None:
+    monkeypatch.setattr("app.cli.__main__.capture_first_run_if_needed", lambda: None)
+    monkeypatch.setattr("app.cli.__main__.shutdown_analytics", lambda **_kw: None)
+    monkeypatch.setattr("app.cli.__main__.capture_cli_invoked", lambda *_args: None)
+
+    original_show = click.exceptions.UsageError.show
+
+    def _raise_broken_pipe(self, file=None):  # type: ignore[no-untyped-def]
+        raise BrokenPipeError(32, "Broken pipe")
+
+    monkeypatch.setattr(click.exceptions.UsageError, "show", _raise_broken_pipe)
+
+    exit_code = main(["--definitely-wrong-option"])
+
+    assert exit_code == 2
+    monkeypatch.setattr(click.exceptions.UsageError, "show", original_show)
+
+
 def test_no_reload_flag_passes_reload_disabled(monkeypatch) -> None:
     monkeypatch.setattr("app.cli.__main__.capture_first_run_if_needed", lambda: None)
     monkeypatch.setattr("app.cli.__main__.shutdown_analytics", lambda **_kw: None)
