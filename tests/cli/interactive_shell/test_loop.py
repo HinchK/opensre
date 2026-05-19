@@ -353,6 +353,41 @@ def test_run_new_alert_tracks_cli_paste_source(monkeypatch: pytest.MonkeyPatch) 
     assert track_calls == [("cli_paste", "paste")]
 
 
+def test_run_new_alert_hides_prompt_spinner_before_progress(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed_streaming: list[bool] = []
+    invalidations: list[None] = []
+
+    def _fake_run(
+        *,
+        alert_text: str,
+        context_overrides: object = None,
+        cancel_requested: object = None,
+    ) -> dict[str, object]:
+        _ = (alert_text, context_overrides, cancel_requested)
+        observed_streaming.append(spinner.streaming)
+        return {"root_cause": "handled"}
+
+    monkeypatch.setattr("app.cli.investigation.run_investigation_for_session", _fake_run)
+
+    spinner = loop._SpinnerState()
+    spinner.start()
+    console = loop._StreamingConsole(
+        spinner,
+        threading.Event(),
+        prompt_invalidator=lambda: invalidations.append(None),
+        file=io.StringIO(),
+        force_terminal=False,
+        highlight=False,
+    )
+
+    loop._run_new_alert("High CPU alert", ReplSession(), console)
+
+    assert observed_streaming == [False]
+    assert invalidations == [None]
+
+
 def test_run_new_alert_reports_unexpected_error(monkeypatch: pytest.MonkeyPatch) -> None:
     from rich.console import Console
 
@@ -784,13 +819,14 @@ class TestDispatchSpinnerRouting:
             "/model show",
             "tests",
             "help",
+            '{"alertname": "PipelineLoadFailure", "severity": "critical"}',
             # The router typo-corrects single-edit bare aliases before
             # dispatch, so these are local slash-command paths too.
             "testts",
             "hlep",
         ],
     )
-    def test_slash_dispatches_do_not_show_assistant_spinner(self, text: str) -> None:
+    def test_local_or_progress_dispatches_do_not_show_assistant_spinner(self, text: str) -> None:
         assert loop._dispatch_should_show_spinner(text, ReplSession()) is False
 
     @pytest.mark.parametrize(
@@ -801,7 +837,7 @@ class TestDispatchSpinnerRouting:
             "explain deploy",
         ],
     )
-    def test_non_slash_dispatches_show_assistant_spinner(self, text: str) -> None:
+    def test_assistant_text_dispatches_show_assistant_spinner(self, text: str) -> None:
         assert loop._dispatch_should_show_spinner(text, ReplSession()) is True
 
 
@@ -989,6 +1025,24 @@ class TestStreamingConsole:
         cancel.clear()
         assert console.cancel_requested is False
 
+    def test_suppress_prompt_spinner_stops_spinner_and_invalidates(self) -> None:
+        spinner = loop._SpinnerState()
+        spinner.start()
+        invalidations: list[None] = []
+        console = loop._StreamingConsole(
+            spinner,
+            threading.Event(),
+            prompt_invalidator=lambda: invalidations.append(None),
+            file=io.StringIO(),
+            force_terminal=False,
+            highlight=False,
+        )
+
+        console.suppress_prompt_spinner()
+
+        assert spinner.streaming is False
+        assert invalidations == [None]
+
 
 # ── ReplState dataclass tests ────────────────────────────────────────────────
 
@@ -1150,8 +1204,8 @@ class TestReplState:
 
 
 class TestBuildCancelKeyBindings:
-    """``_build_cancel_key_bindings`` returns a ``KeyBindings`` with two
-    handlers — Esc and Ctrl+L. The handlers are extracted out of the
+    """``_build_cancel_key_bindings`` returns prompt-level control
+    handlers. The handlers are extracted out of the
     prompt loop so they can be exercised without the full async
     machinery; this test instantiates the bindings and verifies they
     were registered for the right keys."""
@@ -1165,6 +1219,7 @@ class TestBuildCancelKeyBindings:
         registered = {getattr(k, "value", k) for b in kb.bindings for k in b.keys}
         assert "escape" in registered, f"escape binding missing — registered: {registered}"
         assert "c-l" in registered, f"Ctrl+L binding missing — registered: {registered}"
+        assert "c-o" in registered, f"Ctrl+O binding missing — registered: {registered}"
 
 
 # ── Confirmation routing (worker-thread bridge) ──────────────────────────────

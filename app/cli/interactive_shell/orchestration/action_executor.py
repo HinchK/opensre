@@ -1123,6 +1123,9 @@ def run_sample_alert(
     )
     task.mark_running()
     try:
+        suppress = getattr(console, "suppress_prompt_spinner", None)
+        if callable(suppress):
+            suppress()
         final_state = run_sample_alert_for_session(
             template_name=template_name,
             context_overrides=session.accumulated_context or None,

@@ -25,6 +25,7 @@ conventions: input pinned at bottom, history scrolls naturally.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import random
 import re
@@ -160,6 +161,24 @@ def _looks_like_cancel_request(text: str | None) -> bool:
     return (text or "").strip().lower() in _CANCEL_REQUEST_TOKENS
 
 
+def _suppress_prompt_spinner_for_progress(console: Console) -> None:
+    """Hide the REPL assistant spinner before a nested progress renderer starts."""
+    suppress = getattr(console, "suppress_prompt_spinner", None)
+    if callable(suppress):
+        suppress()
+
+
+def _looks_like_json_for_progress(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped.startswith(("{", "[")):
+        return False
+    try:
+        json.loads(stripped)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return False
+    return True
+
+
 def _dispatch_should_show_spinner(text: str, session: ReplSession) -> bool:
     """Return False for deterministic slash-command dispatches.
 
@@ -171,6 +190,8 @@ def _dispatch_should_show_spinner(text: str, session: ReplSession) -> bool:
     """
     stripped = text.strip()
     if stripped.startswith("/"):
+        return False
+    if _looks_like_json_for_progress(stripped):
         return False
     return not _router.is_bare_command_alias(stripped, session)
 
@@ -203,13 +224,19 @@ def _dispatch_needs_exclusive_stdin(text: str, session: ReplSession) -> bool:
 
     Most turns can run while prompt-toolkit immediately opens the next input
     frame, which is what gives the shell type-ahead during streaming. A few
-    slash commands, however, temporarily own stdin themselves: inline
-    ``repl_choose_one`` menus and subprocess-backed interactive wizards. If the
-    next prompt starts underneath those, prompt-toolkit can send a cursor
-    position request and the terminal's reply (for example ``[32;1R``) leaks
-    into the prompt or menu input. Exit commands also pause so the shell does
-    not draw one more prompt after printing goodbye. Waiting only for these
-    known cases preserves type-ahead everywhere else.
+    slash commands temporarily own stdin themselves: inline ``repl_choose_one``
+    menus and subprocess-backed interactive wizards. If the next prompt starts
+    underneath those, prompt-toolkit can send a cursor position request and
+    the terminal's reply (for example ``[32;1R``) leaks into the menu input.
+    Exit commands also pause so the shell does not draw one more prompt after
+    printing goodbye. Waiting only for these known cases preserves type-ahead
+    everywhere else.
+
+    ``new_alert`` investigations are excluded here because they first require
+    a ``Proceed? [Y/n]`` confirmation delivered through ``prompt_async`` — the
+    prompt loop must stay live to receive it. Stdin exclusivity during the
+    post-investigation feedback picker is handled separately via
+    ``_ReplState.stdin_exclusive_event``.
     """
     if not repl_tty_interactive():
         return False
@@ -274,6 +301,7 @@ def _run_new_alert(
     *,
     confirm_fn: Callable[[str], str] | None = None,
     is_tty: bool | None = None,
+    stdin_exclusive_event: threading.Event | None = None,
 ) -> None:
     """Dispatch a free-text alert description to the streaming pipeline."""
     from app.analytics.cli import track_investigation
@@ -308,6 +336,7 @@ def _run_new_alert(
             ),
             apply_reasoning_effort(session.reasoning_effort),
         ):
+            _suppress_prompt_spinner_for_progress(console)
             final_state = run_investigation_for_session(
                 alert_text=text,
                 context_overrides=session.accumulated_context or None,
@@ -339,6 +368,18 @@ def _run_new_alert(
     session.accumulate_from_state(final_state)
     session.record("alert", text)
 
+    from app.cli.support.feedback import prompt_investigation_feedback
+
+    # Claim exclusive stdin so the prompt loop doesn't start prompt_async
+    # (and trigger a DSR cursor query) while the feedback picker reads keys.
+    if stdin_exclusive_event is not None:
+        stdin_exclusive_event.set()
+    try:
+        prompt_investigation_feedback(final_state, console=console)
+    finally:
+        if stdin_exclusive_event is not None:
+            stdin_exclusive_event.clear()
+
 
 def _dispatch_one_turn(
     text: str,
@@ -347,6 +388,7 @@ def _dispatch_one_turn(
     *,
     on_exit: Callable[[], None],
     confirm_fn: Callable[[str], str] | None = None,
+    stdin_exclusive_event: threading.Event | None = None,
 ) -> None:
     """Route + dispatch one accepted line. Pure synchronous body.
 
@@ -420,7 +462,13 @@ def _dispatch_one_turn(
         return
 
     if kind == "new_alert":
-        _run_new_alert(text, session, console, confirm_fn=confirm_fn)
+        _run_new_alert(
+            text,
+            session,
+            console,
+            confirm_fn=confirm_fn,
+            stdin_exclusive_event=stdin_exclusive_event,
+        )
         return
 
     # follow_up — grounded answer against session.last_state
@@ -610,6 +658,13 @@ class _ReplState:
     # to the worker thread instead of queueing a new turn.
     confirm_event: threading.Event | None = None
     confirm_response: list[str] = field(default_factory=list)
+    # Set by a worker thread immediately before it needs to own stdin
+    # (e.g. the post-investigation feedback picker). The prompt loop
+    # checks this before starting the next ``prompt_async`` and waits
+    # until the worker clears it.  Unlike ``queue.join()`` this does not
+    # block confirmation delivery, because the worker sets it only *after*
+    # the confirmation step has already completed.
+    stdin_exclusive_event: threading.Event = field(default_factory=threading.Event)
 
     def is_dispatch_running(self) -> bool:
         return self.current_task is not None and not self.current_task.done()
@@ -765,6 +820,7 @@ class _StreamingConsole(Console):
         self,
         spinner: _SpinnerState,
         cancel_event: threading.Event,
+        prompt_invalidator: Callable[[], None] | None = None,
         **kwargs: Any,
     ) -> None:
         # ``**kwargs: Any`` (rather than ``object``) so we don't need a
@@ -775,6 +831,7 @@ class _StreamingConsole(Console):
         super().__init__(**kwargs)
         self._spinner = spinner
         self._cancel_event = cancel_event
+        self._prompt_invalidator = prompt_invalidator
 
     def update_streaming_progress(self, bytes_received: int) -> None:
         # Plain attribute write — read by ``_SpinnerState.toolbar_ansi``
@@ -787,6 +844,14 @@ class _StreamingConsole(Console):
     @property
     def cancel_requested(self) -> bool:
         return self._cancel_event.is_set()
+
+    def suppress_prompt_spinner(self) -> None:
+        """Stop the REPL spinner before another live renderer owns the footer."""
+        if not self._spinner.streaming:
+            return
+        self._spinner.stop()
+        if self._prompt_invalidator is not None:
+            self._prompt_invalidator()
 
 
 async def _run_interactive(
@@ -841,6 +906,10 @@ async def _run_interactive(
     # leaving the user staring at an idle one until they hit Enter.
     pt_app = pt_session.app
     main_loop = asyncio.get_running_loop()
+
+    def _invalidate_prompt() -> None:
+        main_loop.call_soon_threadsafe(pt_app.invalidate)
+
     # Bind the loop so :meth:`_ReplState.cancel_current_dispatch` can
     # route ``Task.cancel`` through ``call_soon_threadsafe`` when it's
     # invoked from a worker thread (see :func:`_request_exit`).
@@ -873,6 +942,7 @@ async def _run_interactive(
         console = _StreamingConsole(
             spinner,
             dispatch_cancel,
+            prompt_invalidator=_invalidate_prompt,
             highlight=False,
             force_terminal=True,
             color_system="truecolor",
@@ -882,14 +952,18 @@ async def _run_interactive(
         if show_spinner:
             spinner.start()
         try:
-            await asyncio.to_thread(
-                _dispatch_one_turn,
-                text,
-                session,
-                console,
-                on_exit=_request_exit,
-                confirm_fn=lambda prompt: _route_confirm_through_prompt(state, prompt),
-            )
+            from app.cli.support.output import suppress_stdin_watchers
+
+            with suppress_stdin_watchers():
+                await asyncio.to_thread(
+                    _dispatch_one_turn,
+                    text,
+                    session,
+                    console,
+                    on_exit=_request_exit,
+                    confirm_fn=lambda prompt: _route_confirm_through_prompt(state, prompt),
+                    stdin_exclusive_event=state.stdin_exclusive_event,
+                )
         except asyncio.CancelledError:
             console.print(f"[{WARNING}]· interrupted[/]")
             raise
@@ -1031,6 +1105,13 @@ async def _run_interactive(
                 # ``cfg.reload`` was off (hot_reloader is None).
                 if hot_reloader is not None and not state.is_dispatch_running():
                     hot_reloader.check_and_reload(echo_console)
+
+                # Wait if a worker thread has claimed exclusive stdin
+                # (e.g. the post-investigation feedback picker). Poll
+                # with a short timeout so Ctrl+C and exit still respond.
+                while state.stdin_exclusive_event.is_set():
+                    await asyncio.sleep(0.05)
+
                 try:
                     text = await pt_session.prompt_async(
                         message=_message_with_spinner,
@@ -1220,6 +1301,15 @@ def _build_cancel_key_bindings(state: _ReplState) -> KeyBindings:
         # Clear the screen (terminal-native shortcut). The prompt
         # repaints automatically on the next render tick.
         event.app.renderer.clear()
+
+    @kb.add("c-o")
+    def _on_ctrl_o(_event: KeyPressEvent) -> None:
+        # The investigation renderer normally owns Ctrl+O with a raw stdin
+        # watcher. Inside the REPL, prompt-toolkit is the stdin owner, so route
+        # the key through the active progress callback instead.
+        from app.cli.support.output import toggle_active_tool_details
+
+        toggle_active_tool_details()
 
     return kb
 
