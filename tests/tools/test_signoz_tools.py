@@ -95,6 +95,22 @@ class _FakeSigNozBackend:
 
 
 class TestQuerySignozLogs:
+    def test_available_with_query_api_credentials_only(self) -> None:
+        from app.tools.SignozLogsTool import _logs_is_available
+
+        assert (
+            _logs_is_available(
+                {
+                    "signoz": {
+                        "url": "http://localhost:8080",
+                        "api_key": "test-key",
+                        "connection_verified": False,
+                    }
+                }
+            )
+            is True
+        )
+
     def test_backend_injection(self) -> None:
         backend = _FakeSigNozBackend()
         result = query_signoz_logs(
@@ -145,7 +161,7 @@ class TestQuerySignozMetrics:
             _metrics_is_available(
                 {
                     "signoz": {
-                        "url": "http://localhost:3301",
+                        "url": "http://localhost:8080",
                         "api_key": "test-key",
                         "connection_verified": False,
                     }
@@ -156,6 +172,22 @@ class TestQuerySignozMetrics:
 
 
 class TestQuerySignozTraces:
+    def test_available_with_query_api_credentials_only(self) -> None:
+        from app.tools.SignozTracesTool import _traces_is_available
+
+        assert (
+            _traces_is_available(
+                {
+                    "signoz": {
+                        "url": "http://localhost:8080",
+                        "api_key": "test-key",
+                        "connection_verified": False,
+                    }
+                }
+            )
+            is True
+        )
+
     def test_backend_injection(self) -> None:
         backend = _FakeSigNozBackend()
         result = query_signoz_traces(

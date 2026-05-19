@@ -90,14 +90,11 @@ def query_signoz_metrics(
         )
 
     config = SigNozConfig.model_validate(_kwargs)
-    if not (config.has_metrics_api or config.is_configured):
+    if not config.is_configured:
         return {
             "source": "signoz_metrics",
             "available": False,
-            "error": (
-                "SigNoz metrics not configured. Provide SIGNOZ_URL + SIGNOZ_API_KEY "
-                "(preferred) or ClickHouse settings."
-            ),
+            "error": ("SigNoz metrics not configured. Provide SIGNOZ_URL and SIGNOZ_API_KEY."),
             "metrics": [],
         }
 

@@ -845,18 +845,12 @@ def _classify_service_instance(
                 {
                     "url": credentials.get("url", ""),
                     "api_key": credentials.get("api_key", ""),
-                    "clickhouse_host": credentials.get("clickhouse_host", ""),
-                    "clickhouse_port": int(credentials.get("clickhouse_port", 8123) or 8123),
-                    "clickhouse_database": credentials.get("clickhouse_database", "default"),
-                    "clickhouse_user": credentials.get("clickhouse_user", "default"),
-                    "clickhouse_password": credentials.get("clickhouse_password", ""),
-                    "secure": credentials.get("secure", False),
                     "integration_id": record_id,
                 }
             )
         except Exception:
             return None, None
-        if signoz_config.clickhouse_host or signoz_config.has_metrics_api:
+        if signoz_config.is_configured:
             return signoz_config.model_dump(), "signoz"
         return None, None
 
@@ -1710,9 +1704,7 @@ def load_env_integrations() -> list[dict[str, Any]]:
 
     try:
         signoz_config = signoz_config_from_env()
-        if signoz_config is not None and (
-            signoz_config.is_configured or signoz_config.has_metrics_api
-        ):
+        if signoz_config is not None and signoz_config.is_configured:
             integrations.append(
                 _active_env_record(
                     "signoz",

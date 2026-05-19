@@ -65,7 +65,7 @@ def signoz_available_or_backend(sources: dict[str, dict]) -> bool:
     signoz = sources.get("signoz", {})
     if signoz.get("_backend"):
         return True
-    return bool(signoz.get("connection_verified") and signoz.get("clickhouse_host"))
+    return bool(signoz.get("connection_verified") and signoz.get("url") and signoz.get("api_key"))
 
 
 def hermes_available_or_backend(sources: dict[str, dict]) -> bool:

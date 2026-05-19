@@ -10,25 +10,6 @@ from app.integrations.signoz import SigNozConfig
 from app.services.signoz.client import SigNozClient
 
 
-class _FakeResult:
-    def __init__(self, row: tuple[Any, ...]) -> None:
-        self.row_count = 1
-        self.first_row = row
-
-
-class _FakeClient:
-    def __init__(self, row: tuple[Any, ...]) -> None:
-        self._row = row
-        self.closed = False
-
-    def query(self, _query: str, parameters: dict[str, Any] | None = None) -> _FakeResult:
-        assert parameters is not None
-        return _FakeResult(self._row)
-
-    def close(self) -> None:
-        self.closed = True
-
-
 class _FakeMetricsResult:
     def __init__(self, rows: list[dict[str, Any]]) -> None:
         self._rows = rows
@@ -37,21 +18,6 @@ class _FakeMetricsResult:
 
     def named_results(self) -> list[dict[str, Any]]:
         return self._rows
-
-
-class _CaptureMetricsClient:
-    def __init__(self) -> None:
-        self.closed = False
-        self.last_query = ""
-        self.last_params: dict[str, Any] | None = None
-
-    def query(self, query: str, parameters: dict[str, Any] | None = None) -> _FakeMetricsResult:
-        self.last_query = query
-        self.last_params = parameters or {}
-        return _FakeMetricsResult([])
-
-    def close(self) -> None:
-        self.closed = True
 
 
 class _FakeHTTPResponse:
@@ -83,37 +49,13 @@ class _ErrorHTTPResponse:
         return self._payload
 
 
-def test_query_trace_summary_sanitizes_nan(monkeypatch) -> None:
-    fake_client = _FakeClient((0, 0, float("nan"), float("nan"), float("nan"), float("nan")))
-    monkeypatch.setattr("app.services.signoz.client._make_client", lambda _config: fake_client)
-
-    config = SigNozConfig(clickhouse_host="localhost")
-    result = SigNozClient(config).query_trace_summary(service="svc", time_range_minutes=60)
-
-    assert result["total_spans"] == 0
-    assert result["error_spans"] == 0
-    assert result["error_rate"] == 0.0
-    assert result["p99_ms"] == 0.0
-    assert result["p95_ms"] == 0.0
-    assert result["avg_ms"] == 0.0
-    assert result["max_ms"] == 0.0
-    assert fake_client.closed is True
+def test_query_logs_requires_configuration() -> None:
+    result = SigNozClient(SigNozConfig()).query_logs()
+    assert result["available"] is False
+    assert "SIGNOZ_URL" in result.get("error", "")
 
 
-def test_query_metrics_uses_null_safe_env_join(monkeypatch) -> None:
-    fake_client = _CaptureMetricsClient()
-    monkeypatch.setattr("app.services.signoz.client._make_client", lambda _config: fake_client)
-
-    config = SigNozConfig(clickhouse_host="localhost")
-    result = SigNozClient(config).query_metrics(metric_name="cpu_usage", service="svc")
-
-    assert result["available"] is True
-    assert result["metric_name"] == "cpu_usage"
-    assert "coalesce(s.env, '') = coalesce(ts.env, '')" in fake_client.last_query
-    assert fake_client.closed is True
-
-
-def test_query_metrics_uses_metrics_api_when_configured(monkeypatch) -> None:
+def test_query_metrics_uses_query_api_when_configured(monkeypatch) -> None:
     captured: dict[str, Any] = {}
 
     def _fake_post(url: str, **kwargs: Any) -> _FakeHTTPResponse:
@@ -157,14 +99,11 @@ def test_query_metrics_uses_metrics_api_when_configured(monkeypatch) -> None:
 
     monkeypatch.setattr("app.services.signoz.client.httpx.post", _fake_post)
 
-    config = SigNozConfig(
-        url="http://localhost:3301",
-        api_key="test-key",
-    )
+    config = SigNozConfig(url="http://localhost:8080", api_key="test-key")
     result = SigNozClient(config).query_metrics(metric_name="cpu_usage", service="payments")
 
     assert result["available"] is True
-    assert result["query_backend"] == "signoz_metrics_api"
+    assert result["query_backend"] == "signoz_query_api"
     assert result["resolved_metric"] == "system_cpu_usage"
     assert result["metrics"][0]["service_name"] == "payments"
     assert captured["url"].endswith("/api/v5/query_range")
@@ -214,4 +153,149 @@ def test_query_metrics_handles_not_found_via_metrics_api(monkeypatch) -> None:
 
     assert result["available"] is True
     assert result["total"] == 0
+    assert result["query_backend"] == "signoz_query_api"
     assert "warning" in result
+
+
+def test_query_logs_uses_query_api_when_configured(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_post(_url: str, **kwargs: Any) -> _FakeHTTPResponse:
+        captured["payload"] = kwargs.get("json")
+        return _FakeHTTPResponse(
+            {
+                "status": "success",
+                "data": {
+                    "type": "raw",
+                    "data": {
+                        "results": [
+                            {
+                                "queryName": "A",
+                                "rows": [
+                                    {
+                                        "timestamp": "2024-01-01T00:00:00Z",
+                                        "data": {
+                                            "body": "connection refused",
+                                            "severity_text": "ERROR",
+                                            "severity_number": 17,
+                                            "trace_id": "abc",
+                                            "span_id": "def",
+                                            "attributes_string": {},
+                                            "resources_string": {"service.name": "api"},
+                                        },
+                                    }
+                                ],
+                            }
+                        ]
+                    },
+                },
+            }
+        )
+
+    monkeypatch.setattr("app.services.signoz.client.httpx.post", _fake_post)
+
+    config = SigNozConfig(url="http://localhost:3301", api_key="test-key")
+    result = SigNozClient(config).query_logs(service="api", severity="ERROR", limit=5)
+
+    assert result["available"] is True
+    assert result["query_backend"] == "signoz_query_api"
+    assert result["total"] == 1
+    assert result["logs"][0]["message"] == "connection refused"
+    payload = captured["payload"]
+    assert payload["requestType"] == "raw"
+    assert payload["compositeQuery"]["queries"][0]["spec"]["signal"] == "logs"
+
+
+def test_query_traces_uses_query_api_when_configured(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_post(_url: str, **kwargs: Any) -> _FakeHTTPResponse:
+        captured["payload"] = kwargs.get("json")
+        return _FakeHTTPResponse(
+            {
+                "status": "success",
+                "data": {
+                    "type": "raw",
+                    "data": {
+                        "results": [
+                            {
+                                "queryName": "A",
+                                "rows": [
+                                    {
+                                        "timestamp": "2024-01-01T00:00:00Z",
+                                        "data": {
+                                            "serviceName": "api",
+                                            "name": "GET /health",
+                                            "traceID": "trace-1",
+                                            "spanID": "span-1",
+                                            "durationNano": 150_000_000,
+                                            "hasError": True,
+                                            "statusCode": 2,
+                                            "statusCodeString": "Error",
+                                            "httpMethod": "GET",
+                                            "httpUrl": "/health",
+                                            "kindString": "Server",
+                                        },
+                                    }
+                                ],
+                            }
+                        ]
+                    },
+                },
+            }
+        )
+
+    monkeypatch.setattr("app.services.signoz.client.httpx.post", _fake_post)
+
+    config = SigNozConfig(url="http://localhost:3301", api_key="test-key")
+    result = SigNozClient(config).query_traces(service="api", error_only=True, limit=5)
+
+    assert result["available"] is True
+    assert result["query_backend"] == "signoz_query_api"
+    assert result["traces"][0]["duration_ms"] == 150.0
+    assert result["traces"][0]["has_error"] is True
+    payload = captured["payload"]
+    assert payload["compositeQuery"]["queries"][0]["spec"]["signal"] == "traces"
+    assert (
+        "hasError = true" in payload["compositeQuery"]["queries"][0]["spec"]["filter"]["expression"]
+    )
+
+
+def test_query_trace_summary_uses_query_api_when_configured(monkeypatch) -> None:
+    def _fake_post(_url: str, **kwargs: Any) -> _FakeHTTPResponse:
+        return _FakeHTTPResponse(
+            {
+                "status": "success",
+                "data": {
+                    "type": "scalar",
+                    "data": {
+                        "results": [
+                            {
+                                "columns": [
+                                    {"name": "__result_0", "queryName": "A"},
+                                    {"name": "__result_0", "queryName": "B"},
+                                    {"name": "__result_0", "queryName": "C"},
+                                    {"name": "__result_0", "queryName": "D"},
+                                    {"name": "__result_0", "queryName": "E"},
+                                    {"name": "__result_0", "queryName": "F"},
+                                ],
+                                "data": [
+                                    [100, 5, 250_000_000, 180_000_000, 120_000_000, 500_000_000]
+                                ],
+                            }
+                        ]
+                    },
+                },
+            }
+        )
+
+    monkeypatch.setattr("app.services.signoz.client.httpx.post", _fake_post)
+
+    config = SigNozConfig(url="http://localhost:3301", api_key="test-key")
+    result = SigNozClient(config).query_trace_summary(service="api")
+
+    assert result["available"] is True
+    assert result["query_backend"] == "signoz_query_api"
+    assert result["total_spans"] == 100
+    assert result["error_spans"] == 5
+    assert result["p99_ms"] == 250.0

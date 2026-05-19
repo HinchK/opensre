@@ -751,29 +751,16 @@ def _setup_alertmanager() -> None:
 
 
 def _setup_signoz() -> None:
-    url = _p("SigNoz URL (required for Metrics API mode, e.g. http://localhost:3301)")
-    api_key = _p("SigNoz API key (required for Metrics API mode)", secret=True)
-    clickhouse_host = _p("ClickHouse host (optional, needed for logs/traces)")
-    clickhouse_port = _p("ClickHouse port", default="8123")
-    clickhouse_user = _p("ClickHouse user", default="default")
-    clickhouse_password = _p("ClickHouse password", secret=True)
-    clickhouse_database = _p("ClickHouse database", default="default")
+    url = _p("SigNoz URL (e.g. http://localhost:8080 for local Docker)")
+    api_key = _p("SigNoz API key (service account key)", secret=True)
 
-    if not (clickhouse_host or (url and api_key)):
-        _die(
-            "Provide either SigNoz URL + API key (Metrics API mode) "
-            "or ClickHouse host (ClickHouse mode)."
-        )
+    if not (url and api_key):
+        _die("SigNoz URL and API key are required.")
 
     upsert_integration(
         "signoz",
         {
             "credentials": {
-                "clickhouse_host": clickhouse_host,
-                "clickhouse_port": int(clickhouse_port) if clickhouse_port.isdigit() else 8123,
-                "clickhouse_user": clickhouse_user,
-                "clickhouse_password": clickhouse_password,
-                "clickhouse_database": clickhouse_database,
                 "url": url,
                 "api_key": api_key,
             }
