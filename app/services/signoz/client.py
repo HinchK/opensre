@@ -135,7 +135,9 @@ def _parse_trace_row(row: dict[str, Any]) -> dict[str, Any]:
         ),
         "http_method": _coerce_str(_field_from_data(data, "http_method", "httpMethod")),
         "http_url": _coerce_str(_field_from_data(data, "http_url", "httpUrl")),
-        "kind_string": _coerce_str(_field_from_data(data, "kind_string", "kindString")),
+        "kind_string": _coerce_str(
+            _field_from_data(data, "kind_string", "kindString", "spanKind", "kind")
+        ),
         "service_name": _coerce_str(_field_from_data(data, "service_name", "serviceName")),
     }
 
@@ -473,7 +475,7 @@ class SigNozClient:
                 {"name": "statusCodeString"},
                 {"name": "httpMethod"},
                 {"name": "httpUrl"},
-                {"name": "kindString"},
+                {"name": "kind_string"},
             ],
             "order": [{"key": {"name": "timestamp"}, "direction": "desc"}],
             "offset": 0,

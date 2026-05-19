@@ -234,7 +234,7 @@ def test_query_traces_uses_query_api_when_configured(monkeypatch) -> None:
                                             "statusCodeString": "Error",
                                             "httpMethod": "GET",
                                             "httpUrl": "/health",
-                                            "kindString": "Server",
+                                            "kind_string": "Server",
                                         },
                                     }
                                 ],
