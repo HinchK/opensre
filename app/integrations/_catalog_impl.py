@@ -856,7 +856,7 @@ def _classify_service_instance(
             )
         except Exception:
             return None, None
-        if signoz_config.clickhouse_host:
+        if signoz_config.clickhouse_host or signoz_config.has_metrics_api:
             return signoz_config.model_dump(), "signoz"
         return None, None
 
@@ -1710,7 +1710,9 @@ def load_env_integrations() -> list[dict[str, Any]]:
 
     try:
         signoz_config = signoz_config_from_env()
-        if signoz_config is not None and signoz_config.is_configured:
+        if signoz_config is not None and (
+            signoz_config.is_configured or signoz_config.has_metrics_api
+        ):
             integrations.append(
                 _active_env_record(
                     "signoz",

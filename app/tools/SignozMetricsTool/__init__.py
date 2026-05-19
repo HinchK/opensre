@@ -11,7 +11,10 @@ from app.tools.utils.availability import signoz_available_or_backend
 
 
 def _metrics_is_available(sources: dict[str, dict]) -> bool:
-    return signoz_available_or_backend(sources)
+    if signoz_available_or_backend(sources):
+        return True
+    signoz = sources.get("signoz", {})
+    return bool(signoz.get("url") and signoz.get("api_key"))
 
 
 def _metrics_extract_params(sources: dict[str, dict]) -> dict[str, Any]:
@@ -87,11 +90,14 @@ def query_signoz_metrics(
         )
 
     config = SigNozConfig.model_validate(_kwargs)
-    if not config.is_configured:
+    if not (config.has_metrics_api or config.is_configured):
         return {
             "source": "signoz_metrics",
             "available": False,
-            "error": "SigNoz integration not configured",
+            "error": (
+                "SigNoz metrics not configured. Provide SIGNOZ_URL + SIGNOZ_API_KEY "
+                "(preferred) or ClickHouse settings."
+            ),
             "metrics": [],
         }
 

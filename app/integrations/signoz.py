@@ -1,12 +1,9 @@
 """SigNoz integration helpers.
 
-Provides configuration, connectivity validation, and read-only diagnostic
-queries for SigNoz ClickHouse instances.  All operations are production-safe:
-read-only, timeouts enforced, result sizes capped.
+Provides configuration and connectivity validation for SigNoz.
 
-SigNoz stores logs, metrics, and traces in ClickHouse using predictable
-schemas.  This module wraps the shared ClickHouse transport and adds
-schema-aware validation and query helpers.
+Metrics use the SigNoz Query Range API when URL + API key are provided.
+Logs/traces currently continue to use the ClickHouse-backed path.
 """
 
 from __future__ import annotations
@@ -16,6 +13,7 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
 from pydantic import Field, field_validator
 
 from app.integrations._validation_helpers import report_validation_failure
@@ -79,6 +77,11 @@ class SigNozConfig(StrictConfigModel):
     def is_configured(self) -> bool:
         return bool(self.clickhouse_host)
 
+    @property
+    def has_metrics_api(self) -> bool:
+        """Whether SigNoz Metrics API credentials are available."""
+        return bool(self.url and self.api_key)
+
     def to_clickhouse_config(self) -> ClickHouseConfig:
         """Project self into the generic ClickHouse config shape."""
         return ClickHouseConfig.model_validate(
@@ -112,12 +115,16 @@ def build_signoz_config(raw: dict[str, Any] | None) -> SigNozConfig:
 def signoz_config_from_env() -> SigNozConfig | None:
     """Load a SigNoz config from env vars."""
     host = os.getenv("SIGNOZ_CLICKHOUSE_HOST", "").strip()
-    if not host:
+    url = os.getenv("SIGNOZ_URL", "").strip()
+    api_key = os.getenv("SIGNOZ_API_KEY", "").strip()
+
+    if not host and not (url and api_key):
         return None
+
     return build_signoz_config(
         {
-            "url": os.getenv("SIGNOZ_URL", "").strip(),
-            "api_key": os.getenv("SIGNOZ_API_KEY", "").strip(),
+            "url": url,
+            "api_key": api_key,
             "clickhouse_host": host,
             "clickhouse_port": int(
                 os.getenv("SIGNOZ_CLICKHOUSE_PORT", str(DEFAULT_SIGNOZ_PORT))
@@ -136,8 +143,55 @@ def signoz_config_from_env() -> SigNozConfig | None:
 
 def validate_signoz_config(config: SigNozConfig) -> SigNozValidationResult:
     """Validate SigNoz connectivity and schema presence."""
+    if config.has_metrics_api:
+        base_url = config.url.rstrip("/")
+
+        try:
+            response = httpx.post(
+                f"{base_url}/api/v2/metrics",
+                headers={
+                    "SigNoz-Api-Key": config.api_key,
+                    "Accept": "application/json",
+                },
+                params={"limit": 1, "offset": 0},
+                timeout=config.timeout_seconds,
+            )
+            response.raise_for_status()
+            return SigNozValidationResult(
+                ok=True,
+                detail="Connected to SigNoz Metrics API (/api/v2/metrics, /api/v5/query_range).",
+            )
+        except httpx.HTTPStatusError as err:
+            snippet = err.response.text[:200].strip()
+            detail = (
+                f"HTTP {err.response.status_code}: {snippet}"
+                if snippet
+                else f"HTTP {err.response.status_code}"
+            )
+            return SigNozValidationResult(
+                ok=False,
+                detail=f"SigNoz Metrics API validation failed: {detail}",
+            )
+        except Exception as err:
+            report_validation_failure(
+                err,
+                logger=logger,
+                integration="signoz",
+                method="validate_signoz_config.metrics_api",
+            )
+            return SigNozValidationResult(
+                ok=False,
+                detail=f"SigNoz Metrics API validation failed: {err}",
+            )
+
     if not config.clickhouse_host:
-        return SigNozValidationResult(ok=False, detail="SigNoz ClickHouse host is required.")
+        return SigNozValidationResult(
+            ok=False,
+            detail=(
+                "SigNoz configuration is incomplete. Provide SIGNOZ_URL + SIGNOZ_API_KEY "
+                "for Metrics API mode, or SIGNOZ_CLICKHOUSE_HOST for ClickHouse mode."
+            ),
+        )
 
     ch = config.to_clickhouse_config()
     try:

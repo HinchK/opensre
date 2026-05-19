@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
+
 from app.integrations.signoz import SigNozConfig
 from app.services.signoz.client import SigNozClient
 
@@ -52,6 +54,35 @@ class _CaptureMetricsClient:
         self.closed = True
 
 
+class _FakeHTTPResponse:
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self._payload = payload
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict[str, Any]:
+        return self._payload
+
+
+class _ErrorHTTPResponse:
+    def __init__(self, status_code: int, payload: dict[str, Any]) -> None:
+        self.status_code = status_code
+        self._payload = payload
+        self.text = str(payload)
+        self.request = httpx.Request("POST", "http://localhost")
+
+    def raise_for_status(self) -> None:
+        raise httpx.HTTPStatusError(
+            f"error {self.status_code}",
+            request=self.request,
+            response=httpx.Response(self.status_code, request=self.request, json=self._payload),
+        )
+
+    def json(self) -> dict[str, Any]:
+        return self._payload
+
+
 def test_query_trace_summary_sanitizes_nan(monkeypatch) -> None:
     fake_client = _FakeClient((0, 0, float("nan"), float("nan"), float("nan"), float("nan")))
     monkeypatch.setattr("app.services.signoz.client._make_client", lambda _config: fake_client)
@@ -80,3 +111,107 @@ def test_query_metrics_uses_null_safe_env_join(monkeypatch) -> None:
     assert result["metric_name"] == "cpu_usage"
     assert "coalesce(s.env, '') = coalesce(ts.env, '')" in fake_client.last_query
     assert fake_client.closed is True
+
+
+def test_query_metrics_uses_metrics_api_when_configured(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_post(url: str, **kwargs: Any) -> _FakeHTTPResponse:
+        captured["url"] = url
+        captured["kwargs"] = kwargs
+        return _FakeHTTPResponse(
+            {
+                "status": "success",
+                "data": {
+                    "type": "time_series",
+                    "data": {
+                        "results": [
+                            {
+                                "queryName": "A",
+                                "aggregations": [
+                                    {
+                                        "series": [
+                                            {
+                                                "labels": [
+                                                    {
+                                                        "key": {"name": "service.name"},
+                                                        "value": "payments",
+                                                    }
+                                                ],
+                                                "values": [
+                                                    {
+                                                        "timestamp": 1_700_000_000_000,
+                                                        "value": 12.34,
+                                                    }
+                                                ],
+                                            }
+                                        ]
+                                    }
+                                ],
+                            }
+                        ]
+                    },
+                },
+            }
+        )
+
+    monkeypatch.setattr("app.services.signoz.client.httpx.post", _fake_post)
+
+    config = SigNozConfig(
+        url="http://localhost:3301",
+        api_key="test-key",
+    )
+    result = SigNozClient(config).query_metrics(metric_name="cpu_usage", service="payments")
+
+    assert result["available"] is True
+    assert result["query_backend"] == "signoz_metrics_api"
+    assert result["resolved_metric"] == "system_cpu_usage"
+    assert result["metrics"][0]["service_name"] == "payments"
+    assert captured["url"].endswith("/api/v5/query_range")
+    headers = captured["kwargs"]["headers"]
+    assert headers["SigNoz-Api-Key"] == "test-key"
+
+
+def test_query_metrics_handles_empty_aggregation_series(monkeypatch) -> None:
+    def _fake_post(_url: str, **_kwargs: Any) -> _FakeHTTPResponse:
+        return _FakeHTTPResponse(
+            {
+                "status": "success",
+                "data": {
+                    "type": "time_series",
+                    "data": {
+                        "results": [
+                            {
+                                "queryName": "A",
+                                "aggregations": None,
+                            }
+                        ]
+                    },
+                },
+            }
+        )
+
+    monkeypatch.setattr("app.services.signoz.client.httpx.post", _fake_post)
+
+    config = SigNozConfig(url="http://localhost:3301", api_key="test-key")
+    result = SigNozClient(config).query_metrics(metric_name="cpu_usage")
+
+    assert result["available"] is True
+    assert result["total"] == 0
+
+
+def test_query_metrics_handles_not_found_via_metrics_api(monkeypatch) -> None:
+    def _fake_post(_url: str, **_kwargs: Any) -> _ErrorHTTPResponse:
+        return _ErrorHTTPResponse(
+            404,
+            {"status": "error", "error": {"message": "could not find metric"}},
+        )
+
+    monkeypatch.setattr("app.services.signoz.client.httpx.post", _fake_post)
+
+    config = SigNozConfig(url="http://localhost:3301", api_key="test-key")
+    result = SigNozClient(config).query_metrics(metric_name="cpu_usage")
+
+    assert result["available"] is True
+    assert result["total"] == 0
+    assert "warning" in result

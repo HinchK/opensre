@@ -3,7 +3,7 @@
 from typing import Any
 
 from app.tools.SignozLogsTool import query_signoz_logs
-from app.tools.SignozMetricsTool import query_signoz_metrics
+from app.tools.SignozMetricsTool import _metrics_is_available, query_signoz_metrics
 from app.tools.SignozTracesTool import query_signoz_traces
 
 
@@ -139,6 +139,20 @@ class TestQuerySignozMetrics:
         assert result["source"] == "signoz_metrics"
         assert result["available"] is False
         assert "not configured" in result.get("error", "").lower()
+
+    def test_available_with_metrics_api_credentials_only(self) -> None:
+        assert (
+            _metrics_is_available(
+                {
+                    "signoz": {
+                        "url": "http://localhost:3301",
+                        "api_key": "test-key",
+                        "connection_verified": False,
+                    }
+                }
+            )
+            is True
+        )
 
 
 class TestQuerySignozTraces:

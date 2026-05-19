@@ -1,6 +1,9 @@
 # SigNoz Integration
 
-Query logs, metrics, and traces from [SigNoz](https://signoz.io) — an OpenTelemetry-native observability platform that stores everything in ClickHouse.
+Query logs, metrics, and traces from [SigNoz](https://signoz.io).
+
+OpenSRE now prefers the SigNoz **Metrics API** (`/api/v5/query_range`) for
+`query_signoz_metrics` instead of querying SigNoz ClickHouse tables directly.
 
 ## Quick Start
 
@@ -16,16 +19,18 @@ bash infra/scripts/signoz/stop-local.sh
 
 ### 1. Configure Environment Variables
 
-Set your SigNoz ClickHouse credentials:
+Set your SigNoz API credentials (preferred) and optional ClickHouse fallback:
 
 ```bash
+export SIGNOZ_URL="http://localhost:3301"
+export SIGNOZ_API_KEY="<service-account-api-key>"
+
+# Optional fallback credentials (currently used by logs/traces):
 export SIGNOZ_CLICKHOUSE_HOST="localhost"
 export SIGNOZ_CLICKHOUSE_PORT="8123"
 export SIGNOZ_CLICKHOUSE_USER="default"
 export SIGNOZ_CLICKHOUSE_PASSWORD=""
 export SIGNOZ_CLICKHOUSE_DATABASE="default"
-export SIGNOZ_URL="http://localhost:3301"      # optional
-export SIGNOZ_API_KEY=""                        # optional
 ```
 
 ### 2. Verify Connectivity
@@ -37,7 +42,7 @@ opensre integrations verify signoz
 Expected output:
 
 ```
-Connected to ClickHouse 24.x; SigNoz schema verified (4 tables present).
+Connected to SigNoz Metrics API (/api/v5/query_range).
 ```
 
 ### 3. Use the Tools
@@ -45,7 +50,7 @@ Connected to ClickHouse 24.x; SigNoz schema verified (4 tables present).
 When `alert_source` is `signoz`, the agent auto-seeds three tools before the ReAct loop:
 
 - **`query_signoz_logs`** — Search `signoz_logs.distributed_logs_v2` by service, severity, and time window.
-- **`query_signoz_metrics`** — Query `signoz_metrics.distributed_samples_v4` for CPU, memory, and request-rate signals.
+- **`query_signoz_metrics`** — Query SigNoz Metrics API (`/api/v5/query_range`) for CPU, memory, and request-rate signals.
 - **`query_signoz_traces`** — Query `signoz_traces.distributed_signoz_index_v3` for error spans, p99 latency, and inter-service dependencies.
 
 ## Webhook Configuration
@@ -98,13 +103,13 @@ opensre integrations setup signoz
 ```
 
 You will be prompted for:
-- ClickHouse host
+- SigNoz URL
+- SigNoz API key
+- ClickHouse host (optional; currently needed for logs/traces)
 - ClickHouse port (default: 8123)
 - ClickHouse user (default: default)
 - ClickHouse password
 - ClickHouse database (default: default)
-- SigNoz URL (optional)
-- SigNoz API key (optional)
 
 ## Supported Metrics (V1)
 
@@ -116,11 +121,29 @@ The metrics tool supports a curated list of common infrastructure metrics:
 | `memory_usage` | `system_memory_usage` |
 | `request_rate` | `signoz_calls_total` |
 
-You can also pass any raw metric name stored in `signoz_metrics.distributed_time_series_v4`.
+You can also pass any raw metric name known to SigNoz.
 For latency percentiles (p95/p99), prefer `query_signoz_traces`, which computes
 percentile estimates directly from span durations.
 
-## Schema Compatibility
+## Compatibility Notes
+
+### Metrics (preferred path)
+
+Metrics queries use the SigNoz Metrics API endpoint:
+
+- `POST /api/v5/query_range`
+
+Authentication uses:
+
+- `SigNoz-Api-Key: <YOUR_API_KEY>`
+
+### Logs/Traces (current fallback path)
+
+Logs and traces currently continue to use direct ClickHouse reads. That means
+ClickHouse credentials are still needed if you want `query_signoz_logs` and
+`query_signoz_traces` to run.
+
+## Schema Compatibility (ClickHouse fallback)
 
 The integration targets SigNoz v0.x+ with the following ClickHouse tables:
 

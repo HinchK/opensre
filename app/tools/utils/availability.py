@@ -63,7 +63,9 @@ def signoz_available_or_backend(sources: dict[str, dict]) -> bool:
     mock ``signoz_backend`` for synthetic tests.
     """
     signoz = sources.get("signoz", {})
-    return bool(signoz.get("connection_verified") or signoz.get("_backend"))
+    if signoz.get("_backend"):
+        return True
+    return bool(signoz.get("connection_verified") and signoz.get("clickhouse_host"))
 
 
 def hermes_available_or_backend(sources: dict[str, dict]) -> bool:

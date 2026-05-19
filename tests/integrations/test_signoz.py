@@ -8,6 +8,7 @@ from app.integrations.signoz import (
     signoz_config_from_env,
     signoz_extract_params,
     signoz_is_available,
+    validate_signoz_config,
 )
 
 
@@ -138,6 +139,23 @@ class TestSigNozConfigFromEnv:
             ]:
                 os.environ.pop(key, None)
 
+    def test_returns_config_with_metrics_api_only(self) -> None:
+        import os
+
+        os.environ.pop("SIGNOZ_CLICKHOUSE_HOST", None)
+        os.environ["SIGNOZ_URL"] = "http://localhost:3301"
+        os.environ["SIGNOZ_API_KEY"] = "api-key"
+        try:
+            config = signoz_config_from_env()
+            assert config is not None
+            assert config.url == "http://localhost:3301"
+            assert config.api_key == "api-key"
+            assert config.clickhouse_host == ""
+            assert config.has_metrics_api is True
+        finally:
+            os.environ.pop("SIGNOZ_URL", None)
+            os.environ.pop("SIGNOZ_API_KEY", None)
+
 
 class TestSigNozValidationResult:
     """Tests for SigNozValidationResult dataclass."""
@@ -217,3 +235,26 @@ class TestSigNozEnvCatalogLoading:
         records = load_env_integrations()
         assert isinstance(records, list)
         assert all(record.get("service") != "signoz" for record in records)
+
+
+class TestSigNozValidation:
+    def test_validate_metrics_api_mode(self, monkeypatch) -> None:
+        class _FakeResponse:
+            def raise_for_status(self) -> None:
+                return None
+
+        captured: dict[str, object] = {}
+
+        def _fake_post(url: str, **kwargs: object) -> _FakeResponse:
+            captured["url"] = url
+            captured["headers"] = kwargs.get("headers")
+            return _FakeResponse()
+
+        monkeypatch.setattr("app.integrations.signoz.httpx.post", _fake_post)
+
+        config = SigNozConfig(url="http://localhost:3301", api_key="test-key")
+        result = validate_signoz_config(config)
+
+        assert result.ok is True
+        assert "Metrics API" in result.detail
+        assert str(captured["url"]).endswith("/api/v2/metrics")

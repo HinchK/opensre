@@ -1,7 +1,7 @@
-"""SigNoz ClickHouse query client.
+"""SigNoz query client.
 
-Thin wrapper around ``clickhouse_connect`` that knows the SigNoz schema and
-enforces read-only, timeouts, and result caps.
+Uses SigNoz Metrics API for metrics when API credentials are present, and
+retains ClickHouse-backed paths for logs/traces and metrics fallback.
 """
 
 from __future__ import annotations
@@ -10,6 +10,8 @@ import logging
 import math
 from datetime import UTC, datetime, timedelta
 from typing import Any
+
+import httpx
 
 from app.integrations.clickhouse import _get_client
 from app.integrations.signoz import SigNozConfig
@@ -53,11 +55,214 @@ def _bucket_bounds_seconds(start: datetime, end: datetime) -> tuple[int, int]:
     return start_sec - 1800, end_sec
 
 
+def _iso_from_epoch_ms(timestamp_ms: int) -> str:
+    """Render epoch milliseconds as an ISO-8601 UTC timestamp."""
+    return datetime.fromtimestamp(timestamp_ms / 1000, tz=UTC).isoformat().replace("+00:00", "Z")
+
+
 class SigNozClient:
     """Read-only SigNoz ClickHouse client."""
 
     def __init__(self, config: SigNozConfig) -> None:
         self.config = config
+
+    def _has_metrics_api_config(self) -> bool:
+        return bool(self.config.url and self.config.api_key)
+
+    def _metrics_api_base_url(self) -> str:
+        return self.config.url.rstrip("/")
+
+    def _query_metrics_via_api(
+        self,
+        *,
+        metric_name: str,
+        resolved_metric: str,
+        service: str | None,
+        start: datetime,
+        end: datetime,
+        aggregation: str,
+        effective_limit: int,
+    ) -> dict[str, Any]:
+        start_ms = int(start.timestamp() * 1000)
+        end_ms = int(end.timestamp() * 1000)
+        escaped_service = (service or "").replace("\\", "\\\\").replace("'", "\\'")
+        filter_expression = f"service.name = '{escaped_service}'" if escaped_service else ""
+
+        if resolved_metric == "signoz_calls_total":
+            time_aggregation = "rate"
+            space_aggregation = "sum"
+        else:
+            time_aggregation = (
+                aggregation if aggregation in {"sum", "avg", "min", "max", "count"} else "avg"
+            )
+            space_aggregation = (
+                aggregation if aggregation in {"sum", "avg", "min", "max", "count"} else "avg"
+            )
+
+        payload: dict[str, Any] = {
+            "start": start_ms,
+            "end": end_ms,
+            "requestType": "time_series",
+            "compositeQuery": {
+                "queries": [
+                    {
+                        "type": "builder_query",
+                        "spec": {
+                            "name": "A",
+                            "signal": "metrics",
+                            "stepInterval": 60,
+                            "aggregations": [
+                                {
+                                    "metricName": resolved_metric,
+                                    "temporality": "unspecified",
+                                    "timeAggregation": time_aggregation,
+                                    "spaceAggregation": space_aggregation,
+                                }
+                            ],
+                            "groupBy": [{"name": "service.name"}],
+                            "disabled": False,
+                            "limit": effective_limit,
+                        },
+                    }
+                ]
+            },
+            "noCache": True,
+        }
+        if filter_expression:
+            payload["compositeQuery"]["queries"][0]["spec"]["filter"] = {
+                "expression": filter_expression
+            }
+
+        try:
+            response = httpx.post(
+                f"{self._metrics_api_base_url()}/api/v5/query_range",
+                headers={
+                    "SigNoz-Api-Key": self.config.api_key,
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
+                json=payload,
+                timeout=self.config.timeout_seconds,
+            )
+            response.raise_for_status()
+            response_json = response.json()
+        except httpx.HTTPStatusError as err:
+            error_payload: dict[str, Any] = {}
+            try:
+                parsed = err.response.json()
+                if isinstance(parsed, dict):
+                    error_payload = parsed
+            except Exception:
+                error_payload = {}
+            error_message = (
+                error_payload.get("error", {}).get("message")
+                if isinstance(error_payload.get("error"), dict)
+                else ""
+            )
+            if err.response.status_code == 404:
+                return {
+                    "source": "signoz_metrics",
+                    "available": True,
+                    "total": 0,
+                    "metric_name": metric_name,
+                    "resolved_metric": resolved_metric,
+                    "aggregation": aggregation,
+                    "metrics": [],
+                    "query_backend": "signoz_metrics_api",
+                    "warning": error_message or f"Metric not found: {resolved_metric}",
+                }
+            return {
+                "source": "signoz_metrics",
+                "available": False,
+                "metric_name": metric_name,
+                "resolved_metric": resolved_metric,
+                "aggregation": aggregation,
+                "metrics": [],
+                "query_backend": "signoz_metrics_api",
+                "error": error_message or f"HTTP {err.response.status_code}",
+            }
+        except Exception as err:
+            return {
+                "source": "signoz_metrics",
+                "available": False,
+                "metric_name": metric_name,
+                "resolved_metric": resolved_metric,
+                "aggregation": aggregation,
+                "metrics": [],
+                "query_backend": "signoz_metrics_api",
+                "error": str(err),
+            }
+
+        query_response = response_json.get("data", {})
+        if (
+            isinstance(query_response, dict)
+            and "type" in query_response
+            and "data" in query_response
+        ):
+            query_data = query_response.get("data", {})
+        else:
+            query_data = response_json.get("data", {})
+
+        results = query_data.get("results", []) if isinstance(query_data, dict) else []
+
+        metrics: list[dict[str, Any]] = []
+        for result in results:
+            if not isinstance(result, dict):
+                continue
+            aggregations = result.get("aggregations") or []
+            for aggregation_bucket in aggregations:
+                if not isinstance(aggregation_bucket, dict):
+                    continue
+                series_list = aggregation_bucket.get("series") or []
+                for series in series_list:
+                    if not isinstance(series, dict):
+                        continue
+                    labels = series.get("labels", [])
+                    service_name = ""
+                    for label in labels:
+                        if not isinstance(label, dict):
+                            continue
+                        key = label.get("key", {})
+                        key_name = key.get("name") if isinstance(key, dict) else ""
+                        if key_name in {"service.name", "service_name"}:
+                            service_name = str(label.get("value") or "")
+                            break
+
+                    values = series.get("values") or []
+                    for point in values:
+                        if not isinstance(point, dict):
+                            continue
+                        timestamp_ms = int(point.get("timestamp") or 0)
+                        value = point.get("value")
+                        metrics.append(
+                            {
+                                "interval": _iso_from_epoch_ms(timestamp_ms)
+                                if timestamp_ms
+                                else "",
+                                "value": value,
+                                "metric_name": resolved_metric,
+                                "service_name": service_name,
+                            }
+                        )
+                        if len(metrics) >= effective_limit:
+                            break
+                    if len(metrics) >= effective_limit:
+                        break
+                if len(metrics) >= effective_limit:
+                    break
+            if len(metrics) >= effective_limit:
+                break
+
+        return {
+            "source": "signoz_metrics",
+            "available": True,
+            "total": len(metrics),
+            "metric_name": metric_name,
+            "resolved_metric": resolved_metric,
+            "aggregation": aggregation,
+            "metrics": metrics,
+            "query_backend": "signoz_metrics_api",
+        }
 
     # ------------------------------------------------------------------ logs
 
@@ -149,12 +354,23 @@ class SigNozClient:
         aggregation: str = "avg",
         limit: int = 50,
     ) -> dict[str, Any]:
-        """Query ``signoz_metrics.distributed_samples_v4`` joined with ``time_series_v4``."""
+        """Query SigNoz metrics API (preferred) or ClickHouse (fallback)."""
         effective_limit = _clamp_limit(limit, self.config)
         start, end = _time_bounds(time_range_minutes)
 
         # Map curated aliases to actual metric names
         resolved_metric = _CURATED_METRICS.get(metric_name, metric_name)
+
+        if self._has_metrics_api_config():
+            return self._query_metrics_via_api(
+                metric_name=metric_name,
+                resolved_metric=resolved_metric,
+                service=service,
+                start=start,
+                end=end,
+                aggregation=aggregation,
+                effective_limit=effective_limit,
+            )
 
         conditions = [
             "s.unix_milli >= %(start_ms)s",
@@ -223,6 +439,7 @@ class SigNozClient:
                 "resolved_metric": resolved_metric,
                 "aggregation": aggregation,
                 "metrics": metrics,
+                "query_backend": "clickhouse",
             }
         finally:
             client.close()
