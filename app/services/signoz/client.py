@@ -85,8 +85,7 @@ class SigNozClient:
     ) -> dict[str, Any]:
         start_ms = int(start.timestamp() * 1000)
         end_ms = int(end.timestamp() * 1000)
-        escaped_service = (service or "").replace("\\", "\\\\").replace("'", "\\'")
-        filter_expression = f"service.name = '{escaped_service}'" if escaped_service else ""
+        step_interval = max(60, (end_ms - start_ms) // (1000 * 300))
 
         if resolved_metric == "signoz_calls_total":
             time_aggregation = "rate"
@@ -110,7 +109,7 @@ class SigNozClient:
                         "spec": {
                             "name": "A",
                             "signal": "metrics",
-                            "stepInterval": 60,
+                            "stepInterval": step_interval,
                             "aggregations": [
                                 {
                                     "metricName": resolved_metric,
@@ -128,9 +127,16 @@ class SigNozClient:
             },
             "noCache": True,
         }
-        if filter_expression:
+        if service:
             payload["compositeQuery"]["queries"][0]["spec"]["filter"] = {
-                "expression": filter_expression
+                "items": [
+                    {
+                        "key": {"name": "service.name", "type": "tag"},
+                        "op": "=",
+                        "value": service,
+                    }
+                ],
+                "op": "AND",
             }
 
         try:
@@ -201,7 +207,7 @@ class SigNozClient:
         ):
             query_data = query_response.get("data", {})
         else:
-            query_data = response_json.get("data", {})
+            query_data = query_response
 
         results = query_data.get("results", []) if isinstance(query_data, dict) else []
 

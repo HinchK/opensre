@@ -147,7 +147,7 @@ def validate_signoz_config(config: SigNozConfig) -> SigNozValidationResult:
         base_url = config.url.rstrip("/")
 
         try:
-            response = httpx.post(
+            response = httpx.get(
                 f"{base_url}/api/v2/metrics",
                 headers={
                     "SigNoz-Api-Key": config.api_key,

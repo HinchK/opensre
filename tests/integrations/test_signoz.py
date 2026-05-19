@@ -250,7 +250,7 @@ class TestSigNozValidation:
             captured["headers"] = kwargs.get("headers")
             return _FakeResponse()
 
-        monkeypatch.setattr("app.integrations.signoz.httpx.post", _fake_post)
+        monkeypatch.setattr("app.integrations.signoz.httpx.get", _fake_post)
 
         config = SigNozConfig(url="http://localhost:3301", api_key="test-key")
         result = validate_signoz_config(config)
