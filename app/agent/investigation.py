@@ -479,10 +479,16 @@ def _run_parallel(
         return [_call(tool_calls[0])]
 
     results: list[Any] = [None] * len(tool_calls)
-    with ThreadPoolExecutor(max_workers=min(_TOOL_EXECUTOR_WORKERS, len(tool_calls))) as pool:
-        futures = {pool.submit(_call, tc): i for i, tc in enumerate(tool_calls)}
-        for fut in as_completed(futures):
-            results[futures[fut]] = fut.result()
+    try:
+        with ThreadPoolExecutor(max_workers=min(_TOOL_EXECUTOR_WORKERS, len(tool_calls))) as pool:
+            futures = {pool.submit(_call, tc): i for i, tc in enumerate(tool_calls)}
+            for fut in as_completed(futures):
+                results[futures[fut]] = fut.result()
+    except RuntimeError:
+        # interpreter is shutting down; fall back to sequential for remaining calls
+        for i, tc in enumerate(tool_calls):
+            if results[i] is None:
+                results[i] = _call(tc)
     return results
 
 
