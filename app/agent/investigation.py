@@ -480,7 +480,14 @@ def _run_parallel(
 
     results: list[Any] = [None] * len(tool_calls)
     with ThreadPoolExecutor(max_workers=min(_TOOL_EXECUTOR_WORKERS, len(tool_calls))) as pool:
-        futures = {pool.submit(_call, tc): i for i, tc in enumerate(tool_calls)}
+        futures: dict[Any, int] = {}
+        for i, tc in enumerate(tool_calls):
+            try:
+                futures[pool.submit(_call, tc)] = i
+            except RuntimeError:
+                # interpreter shutdown: concurrent.futures raises RuntimeError
+                # when _python_exit() has already fired on the thread pool
+                results[i] = {"error": "system shutting down"}
         for fut in as_completed(futures):
             results[futures[fut]] = fut.result()
     return results
