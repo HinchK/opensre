@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import shutil
 import time
 from http import HTTPStatus
 from pathlib import Path
@@ -161,7 +160,7 @@ def _repair(run: RepairRun, store: RepairStore, token: str) -> None:
         if nothing_left and _green_after_repair(run, store, token, output):
             return
         run.attempt_errors.append(error)
-        run.reason = f"Repair attempt {run.attempts}: {error}."
+        run.reason = f"Repair attempt {run.attempts}: {_reason_for(error, run)}"
         store.save(run)
         if error not in {"checks_failed", "execution_error", "timeout", "no_changes"}:
             run.status = RepairStatus.FAILED
@@ -172,6 +171,28 @@ def _repair(run: RepairRun, store: RepairStore, token: str) -> None:
             return
         time.sleep(1)
     run.status, run.reason = RepairStatus.TIMED_OUT, "The demo reached its time budget."
+
+
+#: What an attempt's error kind means for the person reading the run, in plain words.
+_REASON_TEXT = {
+    "unsupported_pr_branch": (
+        "PR #{pr} comes from a fork; the loop only pushes to branches inside {repo}. "
+        "Choose a pull request opened from a branch in this repository."
+    ),
+    "push_failed": "The fix was made but the push was refused; the attempt report says why.",
+    "checks_failed": "The fix was pushed but CI still failed on it.",
+    "no_changes": "The coding agent made no change to the checkout.",
+    "timeout": "The coding agent ran out of time.",
+    "execution_error": "The coding agent could not run.",
+}
+
+
+def _reason_for(error: str, run: RepairRun) -> str:
+    """The run's reason line for one attempt outcome; unknown kinds keep their code."""
+    template = _REASON_TEXT.get(error)
+    if template is None:
+        return f"{error}."
+    return template.format(pr=run.pr_number, repo=f"{run.owner}/{run.repo}")
 
 
 def _green_after_repair(
@@ -232,8 +253,6 @@ def execute_repair(run: RepairRun, store: RepairStore) -> None:
         _repair(run, store, token)
     if run.checks_passed:
         cleanup_demo(client, run)
-        if run.demo:
-            shutil.rmtree(workspace, ignore_errors=True)
         run.status = RepairStatus.SUCCEEDED
 
 
@@ -278,6 +297,8 @@ def run_ci_repair_worker(store_directory: Path, run_id: str) -> None:
                     RepairStatus.FAILED,
                     f"Repair stopped: {type(exc).__name__}.",
                 )
+        if run.terminal:
+            store.discard_checkout(run)
         run.finished_at = time.time()
         store.save(run)
     finally:

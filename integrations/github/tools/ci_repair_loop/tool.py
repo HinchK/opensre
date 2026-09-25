@@ -18,7 +18,7 @@ from integrations.github.helpers import (
 )
 from integrations.github.tools.ci_repair_loop.credentials import account_id, configured_token
 from integrations.github.tools.ci_repair_loop.fixture import object_response
-from integrations.github.tools.ci_repair_loop.models import RepairRun
+from integrations.github.tools.ci_repair_loop.models import RepairRefused, RepairRun
 from integrations.github.tools.ci_repair_loop.report import render_report
 from integrations.github.tools.ci_repair_loop.schedule import schedule_repair
 from integrations.github.tools.ci_repair_loop.storage import RepairStore
@@ -54,6 +54,10 @@ def _result(run: RepairRun, store: RepairStore) -> dict[str, Any]:
         "repository_url": run.repository_url,
         "response_text": render_report(run, store.directory(run.id)),
     }
+
+
+#: The tool's error line when the target itself was refused; the reply says which to choose.
+_REFUSED_ERROR = "Could not schedule CI repair: the pull request was refused."
 
 
 @tool(
@@ -125,6 +129,8 @@ def schedule_ci_repair_loop(
             store=store,
             scheduler_in_process=_scheduler_in_process(context),
         )
+    except RepairRefused as exc:
+        return {"ok": False, "error": _REFUSED_ERROR, "response_text": exc.user_message}
     except (ValueError, RuntimeError, OSError, GitHubApiError) as exc:
         report_run_error(
             exc,
