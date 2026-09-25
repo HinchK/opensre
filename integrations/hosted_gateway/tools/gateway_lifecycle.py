@@ -57,9 +57,15 @@ _WHOSE = (
     outputs=STATE_OUTPUTS,
 )
 def start_hosted_gateway() -> dict[str, Any]:
-    """Ask the OpenSRE app to start the signed-in organization's gateway."""
+    """Ask the OpenSRE app to start the signed-in organization's gateway.
+
+    The start is always requested, so the app's admin check and its refusals
+    apply. A health read beforehand only shapes the reply: a gateway that was
+    already running is told so. That read is best effort and never blocks the start.
+    """
     try:
         with HostedGatewayClient.from_account() as client:
+            was_running = _was_running(client)
             health = client.start()
     except HostedGatewayError as exc:
         return failure_output(
@@ -67,7 +73,17 @@ def start_hosted_gateway() -> dict[str, Any]:
             tool_name=START_TOOL_NAME,
             component="integrations.hosted_gateway.tools.gateway_lifecycle.start_hosted_gateway",
         )
+    if was_running and health.healthy:
+        return state_output(health, _already_running(health))
     return state_output(health, _started(health))
+
+
+def _was_running(client: HostedGatewayClient) -> bool:
+    """Whether the gateway was healthy before the start; unknown reads as not running."""
+    try:
+        return client.health().healthy
+    except HostedGatewayError:
+        return False
 
 
 @tool(
@@ -107,6 +123,11 @@ def stop_hosted_gateway() -> dict[str, Any]:
             component="integrations.hosted_gateway.tools.gateway_lifecycle.stop_hosted_gateway",
         )
     return state_output(health, _stopped(health))
+
+
+def _already_running(health: GatewayHealth) -> str:
+    name = gateway_name(health)
+    return f"Your organization's hosted gateway{name} is already running; nothing to start."
 
 
 def _started(health: GatewayHealth) -> str:

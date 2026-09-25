@@ -466,6 +466,104 @@ def test_progress_lines_are_relayed_to_the_shell_once_each(monkeypatch: pytest.M
     ]
 
 
+def test_a_queued_prompt_tells_the_user_they_are_waiting_for_a_slot_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A user queued behind another conversation saw nothing at all while waiting."""
+    # Arrange: the gateway keeps the prompt queued for three polls, then finishes it
+    app = _App(
+        [
+            PromptRecord(_ID, "queued"),
+            PromptRecord(_ID, "queued"),
+            PromptRecord(_ID, "queued"),
+            PromptRecord(_ID, "running"),
+            PromptRecord(_ID, "done", answer="pong"),
+        ]
+    )
+    _signed_in_with(monkeypatch, app)
+    monkeypatch.setattr(gateway_prompt, "HOSTED_GATEWAY_QUEUE_NOTICE_SECONDS", 0.0)
+    updates: list[Any] = []
+    context = AgentToolContext(resolved_integrations={}, resources={}, _emit_update=updates.append)
+
+    # Act
+    out = ask_hosted_gateway(prompt="ping", context=context)
+
+    # Assert: one notice while queued, none once running, and the answer arrives
+    assert out["state"] == "done" and out["response_text"] == "pong"
+    assert updates == [{"progress": gateway_prompt._QUEUED_NOTICE}]
+
+
+def test_the_queue_notice_counts_from_when_the_prompt_was_sent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A slow submission must not add its own duration to the ten-second wait for the notice."""
+    # Arrange: the prompt left this machine long ago; the gateway still reports it queued
+    import time
+
+    app = _App([PromptRecord(_ID, "queued"), PromptRecord(_ID, "done", answer="pong")])
+    monkeypatch.setattr(gateway_prompt, "HOSTED_GATEWAY_PROMPT_POLL_SECONDS", 0.0)
+    monkeypatch.setattr(gateway_prompt, "HOSTED_GATEWAY_QUEUE_NOTICE_SECONDS", 10.0)
+    updates: list[Any] = []
+    relay = gateway_prompt._ProgressRelay(
+        AgentToolContext(resolved_integrations={}, resources={}, _emit_update=updates.append)
+    )
+    sent_at = time.monotonic() - 30.0
+
+    # Act
+    record, _waited = gateway_prompt._wait_until_settled(
+        app, PromptRecord(_ID, "queued"), relay, sent_at=sent_at
+    )
+
+    # Assert: the notice appears on the first poll instead of ten seconds later
+    assert record.state == "done"
+    assert updates == [{"progress": gateway_prompt._QUEUED_NOTICE}]
+
+
+def test_a_slow_fetch_before_a_follow_up_answer_is_not_counted_as_queue_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Continuing a prompt reads it first; that read must not make the queue notice fire early."""
+    # Arrange: reading the parked prompt is slow, the answer is then queued briefly and finishes
+    import time
+
+    choice = PromptChoice("Pick", (PromptQuestion("Pick", ("Red", "Blue")),))
+
+    class _SlowRead(_App):
+        def prompt_result(self, prompt_id: str) -> PromptRecord:
+            record = super().prompt_result(prompt_id)
+            if record.state == "needs_input":
+                time.sleep(0.3)
+            return record
+
+    app = _SlowRead(
+        [
+            PromptRecord(_ID, "needs_input", question="Pick", choice=choice),
+            PromptRecord(_ID + "b", "queued", parent_prompt_id=_ID),
+            PromptRecord(_ID + "b", "done", answer="Blue"),
+        ]
+    )
+    _signed_in_with(monkeypatch, app)
+    monkeypatch.setattr(gateway_prompt, "HOSTED_GATEWAY_QUEUE_NOTICE_SECONDS", 0.2)
+    updates: list[Any] = []
+    session = SessionCore()
+    answered = format_ask_user_answers(
+        (AskUserQuestion(label="", title="Pick", options=("Red", "Blue")),), ("Blue",)
+    )
+    scope = ActionToolScope(session=session, console=None, turn_user_message=answered)
+    context = AgentToolContext(
+        resolved_integrations={},
+        resources={ACTION_TOOL_CONTEXT_RESOURCE_KEY: scope},
+        _emit_update=updates.append,
+    )
+
+    # Act
+    out = ask_hosted_gateway(prompt_id=_ID, context=context)
+
+    # Assert: the answer went through and no queue notice appeared for the read's duration
+    assert out["state"] == "done" and out["response_text"] == "Blue"
+    assert updates == []
+
+
 def test_a_record_carries_its_progress_lines() -> None:
     # Arrange
     def answer(_request: httpx.Request) -> httpx.Response:

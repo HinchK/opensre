@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from http import HTTPStatus
+
 import httpx
 import pytest
 
@@ -90,6 +92,11 @@ def test_both_tools_change_shared_state_so_they_ask_first_and_take_no_identifier
 
 
 class _Client:
+    """Start and stop answer with ``outcome``; health answers with ``health_outcome`` when given."""
+
+    health_outcome: GatewayHealth | HostedGatewayError | None = None
+    calls: list[str] = []
+
     def __init__(self, outcome: GatewayHealth | HostedGatewayError) -> None:
         self._outcome = outcome
 
@@ -104,7 +111,22 @@ class _Client:
             raise self._outcome
         return self._outcome
 
-    start = stop = _answer
+    def health(self) -> GatewayHealth:
+        type(self).calls.append("health")
+        outcome = type(self).health_outcome
+        if outcome is None:
+            return self._answer()
+        if isinstance(outcome, HostedGatewayError):
+            raise outcome
+        return outcome
+
+    def start(self) -> GatewayHealth:
+        type(self).calls.append("start")
+        return self._answer()
+
+    def stop(self) -> GatewayHealth:
+        type(self).calls.append("stop")
+        return self._answer()
 
 
 def _signed_in_with(
@@ -143,13 +165,76 @@ def test_start_reports_that_the_gateway_is_still_coming_up(
         monkeypatch,
         GatewayHealth(True, False, gateway_id="org-gateway", actual_state="provisioning"),
     )
+    _Client.calls = []
+
+    # Act
+    out = start_hosted_gateway()
+
+    # Assert: not running, so a start was requested and the reply says it is coming up
+    assert _Client.calls == ["health", "start"]
+    assert out["success"] is True and out["actual_state"] == "provisioning"
+    assert "is provisioning now. Check it again in a minute." in out["response_text"]
+
+
+def test_starting_a_running_gateway_still_requests_the_start_and_says_it_was_running(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The start request always goes to the app (its admin check applies); the reply is accurate."""
+    # Arrange
+    running = GatewayHealth(True, True, gateway_id="org-gateway", actual_state="running")
+    _signed_in_with(monkeypatch, running)
+    _Client.health_outcome = None
+    _Client.calls = []
 
     # Act
     out = start_hosted_gateway()
 
     # Assert
-    assert out["success"] is True and out["actual_state"] == "provisioning"
-    assert "is provisioning now. Check it again in a minute." in out["response_text"]
+    assert _Client.calls == ["health", "start"]
+    assert out["success"] is True and out["healthy"] is True
+    assert out["response_text"].endswith("is already running; nothing to start.")
+
+
+def test_a_failed_health_read_does_not_stop_a_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The user asked for a start; a health timeout must not leave a stopped gateway stopped."""
+    # Arrange: health errors, the start itself works
+    _signed_in_with(
+        monkeypatch,
+        GatewayHealth(True, False, gateway_id="org-gateway", actual_state="provisioning"),
+    )
+    _Client.health_outcome = HostedGatewayError(ERR_NOT_PROVISIONED, HTTPStatus.SERVICE_UNAVAILABLE)
+    _Client.calls = []
+
+    # Act
+    out = start_hosted_gateway()
+
+    # Assert
+    _Client.health_outcome = None
+    assert _Client.calls == ["health", "start"]
+    assert out["success"] is True and "is provisioning now" in out["response_text"]
+
+
+def test_a_member_cannot_start_a_running_gateway_either(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A healthy gateway must not turn a refused start into a successful-looking reply."""
+    # Arrange: health reads fine, the start itself is refused for a non-admin
+    reported: list[BaseException] = []
+    monkeypatch.setattr(results, "report_run_error", lambda exc, **_kw: reported.append(exc))
+    _signed_in_with(monkeypatch, HostedGatewayError(ERR_ADMIN_REQUIRED, HTTPStatus.FORBIDDEN))
+    _Client.health_outcome = GatewayHealth(
+        True, True, gateway_id="org-gateway", actual_state="running"
+    )
+    _Client.calls = []
+
+    # Act
+    out = start_hosted_gateway()
+
+    # Assert
+    _Client.health_outcome = None
+    assert _Client.calls == ["health", "start"]
+    assert out["success"] is False and out["error_kind"] == "admin_required"
+    assert reported == []
 
 
 def test_a_member_is_told_an_admin_is_needed_and_it_is_not_an_incident(
@@ -158,7 +243,7 @@ def test_a_member_is_told_an_admin_is_needed_and_it_is_not_an_incident(
     # Arrange
     reported: list[BaseException] = []
     monkeypatch.setattr(results, "report_run_error", lambda exc, **_kw: reported.append(exc))
-    _signed_in_with(monkeypatch, HostedGatewayError(ERR_ADMIN_REQUIRED, 403))
+    _signed_in_with(monkeypatch, HostedGatewayError(ERR_ADMIN_REQUIRED, HTTPStatus.FORBIDDEN))
 
     # Act
     out = stop_hosted_gateway()

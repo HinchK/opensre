@@ -14,6 +14,7 @@ from config.constants.hosted_gateway import (
     HOSTED_GATEWAY_INTEGRATIONS_PATH,
     HOSTED_GATEWAY_PROMPT_POLL_SECONDS,
     HOSTED_GATEWAY_PROMPT_WAIT_SECONDS,
+    HOSTED_GATEWAY_QUEUE_NOTICE_SECONDS,
 )
 from core.agent_harness.spi.handoff import AskUserQuestion, parse_ask_user_answers, question_key
 from core.agent_harness.spi.session_state import (
@@ -43,6 +44,7 @@ _CHOOSE_COMMAND = "/choose"
 _HOSTED_PROMPT_INTERACTION_PREFIX = "hosted_prompt:"
 #: Progress lines come from the gateway's own tools, whose labels say "this machine".
 _GATEWAY_PROGRESS_PREFIX = "on the gateway: "
+_QUEUED_NOTICE = "waiting for a free slot on the gateway (another conversation is using it)"
 
 _STATE_TEXT = {
     "failed": "The hosted gateway could not run that prompt ({error}).",
@@ -193,10 +195,12 @@ def ask_hosted_gateway(
     scope = _shell_scope(context)
     try:
         with HostedGatewayClient.from_account() as client:
-            record = _submit_or_continue(
+            record, sent_at = _submit_or_continue(
                 client, prompt.strip(), dict(facts or {}), prompt_id.strip(), scope
             )
-            record, waited = _wait_until_settled(client, record, _ProgressRelay(context))
+            record, waited = _wait_until_settled(
+                client, record, _ProgressRelay(context), sent_at=sent_at
+            )
             parent_id = record.parent_prompt_id or prompt_id.strip()
             rejected = _answer_was_rejected(record) and bool(parent_id)
             if rejected:
@@ -221,17 +225,24 @@ def _submit_or_continue(
     facts: dict[str, str],
     prompt_id: str,
     scope: ActionToolScope | None,
-) -> PromptRecord:
-    """Send a new prompt, or read an earlier one and pass the user's answer on if they gave one."""
+) -> tuple[PromptRecord, float]:
+    """Send a new prompt, or read an earlier one and pass the user's answer on if they gave one.
+
+    Also returns when the request that could queue the prompt left this machine,
+    taken right before that call, so queue time excludes any reads before it.
+    """
     if not prompt_id:
-        return client.send_prompt(prompt, context=facts)
+        sent_at = time.monotonic()
+        return client.send_prompt(prompt, context=facts), sent_at
+    fetched_at = time.monotonic()
     record = client.prompt_result(prompt_id)
     if record.state != "needs_input" or record.choice is None:
-        return record
+        return record, fetched_at
     answer = _answer_from_turn(scope, record.choice)
     if answer is None:
-        return record
-    return client.answer_prompt(prompt_id, answer)
+        return record, fetched_at
+    sent_at = time.monotonic()
+    return client.answer_prompt(prompt_id, answer), sent_at
 
 
 def _answer_from_turn(scope: ActionToolScope | None, choice: PromptChoice) -> str | None:
@@ -256,16 +267,31 @@ def _answer_from_turn(scope: ActionToolScope | None, choice: PromptChoice) -> st
 
 
 def _wait_until_settled(
-    client: HostedGatewayClient, record: PromptRecord, relay: _ProgressRelay
+    client: HostedGatewayClient,
+    record: PromptRecord,
+    relay: _ProgressRelay,
+    *,
+    sent_at: float | None = None,
 ) -> tuple[PromptRecord, float]:
-    """Poll the app until the gateway settles the prompt or the wait budget is spent."""
+    """Poll the app until the gateway settles the prompt or the wait budget is spent.
+
+    ``sent_at`` is when the prompt left this machine; the queue notice counts
+    from there, so a slow submission does not delay it.
+    """
     started = time.monotonic()
+    queued_since = started if sent_at is None else sent_at
     current = record
     relay.show(current)
+    queue_noticed = False
     while not current.settled:
         waited = time.monotonic() - started
         if waited >= HOSTED_GATEWAY_PROMPT_WAIT_SECONDS:
             return current, waited
+        in_queue = time.monotonic() - queued_since
+        still_queued = current.state == "queued" and in_queue >= HOSTED_GATEWAY_QUEUE_NOTICE_SECONDS
+        if still_queued and not queue_noticed:
+            relay.note(_QUEUED_NOTICE)
+            queue_noticed = True
         time.sleep(HOSTED_GATEWAY_PROMPT_POLL_SECONDS)
         current = client.prompt_result(record.prompt_id)
         relay.show(current)
@@ -287,6 +313,11 @@ class _ProgressRelay:
                 continue
             self._last_index = line.index
             self._emit({"progress": _GATEWAY_PROGRESS_PREFIX + line.text})
+
+    def note(self, text: str) -> None:
+        """A line about the wait itself, not relayed from the gateway."""
+        if self._emit is not None:
+            self._emit({"progress": text})
 
 
 def _outcome(
