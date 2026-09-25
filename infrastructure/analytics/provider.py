@@ -36,6 +36,7 @@ from config.version import get_opensre_version
 from infrastructure.analytics.analytics_runtime import (
     detect_analytics_runtime,
     detect_container_runtime,
+    has_cicd_marker,
     is_ci_environment,
 )
 from infrastructure.analytics.destination import (
@@ -818,6 +819,19 @@ class Analytics:
             | self._persistent_properties
             | _coerce_properties(event.value, properties)
         )
+        # Startup may load a project environment after this module was imported.
+        # Recheck cheap CI signals without repeating container filesystem probes.
+        is_ci = is_ci_environment()
+        cicd_marker = has_cicd_marker()
+        merged["is_ci"] = is_ci
+        merged["cicd_marker"] = cicd_marker
+        merged["execution_environment"] = (
+            ("ci_container" if is_ci else "container")
+            if _ANALYTICS_RUNTIME.is_container
+            else ("ci" if is_ci else "local")
+        )
+        if event == Event.INSTALL_DETECTED and cicd_marker and not merged.get("install_origin"):
+            merged["install_origin"] = "cicd"
         self._ensure_organization_group(merged)
         envelope = _Envelope(
             event=event.value,

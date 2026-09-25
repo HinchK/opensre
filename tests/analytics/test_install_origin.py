@@ -19,6 +19,7 @@ from infrastructure.analytics.destination import AnalyticsDestination
 
 @pytest.fixture
 def deliveries(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[list[dict[str, Any]]]:
+    monkeypatch.delenv("OPENSRE_CICD", raising=False)
     provider.shutdown_analytics(flush=True)
     for name in ("OPENSRE_NO_TELEMETRY", "OPENSRE_ANALYTICS_DISABLED", "DO_NOT_TRACK"):
         monkeypatch.delenv(name, raising=False)
@@ -53,6 +54,28 @@ def restart(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(provider, "_instance", None)
     monkeypatch.setattr(provider, "_cached_anonymous_id", None)
     monkeypatch.setattr(provider, "_install_capture_state", provider._InstallCaptureState())
+
+
+@pytest.mark.parametrize(
+    ("properties", "origin"),
+    [
+        (None, "cicd"),
+        ({"install_source": "make_install"}, "cicd"),
+        ({"install_origin": "documentation"}, "documentation"),
+    ],
+)
+def test_cicd_marker_applies_to_direct_and_wizard_install_captures(
+    monkeypatch: pytest.MonkeyPatch,
+    deliveries: list[dict[str, Any]],
+    properties: dict[str, Any] | None,
+    origin: str,
+) -> None:
+    monkeypatch.setenv("OPENSRE_CICD", "1")
+    assert provider.capture_install_detected_if_needed(properties)
+    restart(monkeypatch)
+    assert deliveries[0]["properties"]["install_origin"] == origin
+    assert deliveries[0]["properties"]["is_ci"] is True
+    assert deliveries[0]["properties"]["cicd_marker"] is True
 
 
 @pytest.mark.parametrize("original_origin", ["github", ""])
